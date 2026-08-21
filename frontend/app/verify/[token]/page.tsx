@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ShieldCheck, CheckCircle2, AlertTriangle, XCircle, Clock, Eye, ChevronDown, ChevronUp, ExternalLink, RefreshCw } from "lucide-react";
 
-const API_URL = "http://localhost:8000/api";
+const API_URL = "http://localhost:8000/api/v1";
 
 export default function VerificationResult() {
   const { token } = useParams() as { token: string };

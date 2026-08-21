@@ -350,11 +350,35 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
             detail="TAMPERING_DETECTED: Off-chain record hashes do not match the immutable on-chain Merkle Root."
         )
         
+    consistency_errors = []
+    if event.status == EventStatus.SUSPICIOUS_REVIEW.value:
+        validator = ConsistencyAnomalyEngine(db)
+        _, _, consistency_errors = await validator.evaluate_event(
+            institution_id=str(event.institution_id),
+            student_id=str(event.student_id),
+            event_type=event.event_type,
+            payload=event.payload,
+            event_date=event.created_at
+        )
+
     if not checks["On-Chain Credential Status Active"]:
         verification_status = "REVOKED"
+        result_state = "revoked"
+    elif event.status == EventStatus.SUSPICIOUS_REVIEW.value:
+        verification_status = "SUSPICIOUS_REVIEW"
+        result_state = "review"
     else:
         verification_status = "AUTHENTIC"
-        
+        result_state = "verified"
+
+    layered_checks = {
+        "Permission Not Expired/Revoked": True,
+        "On-Chain Credential Status Active": (onchain_status == "ACTIVE"),
+        "Merkle Proof Integrity Valid": True,
+        "Student Identity Matching": True,
+        "Timeline Consistency Checked": (event.status != EventStatus.SUSPICIOUS_REVIEW.value)
+    }
+
     # Log the verification event
     await log_audit_async(
         db,
@@ -366,6 +390,7 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
     
     return VerifyResponse(
         status=verification_status,
+        result=result_state,
         student_name=student.name,
         matriculation_no=student.matriculation_no,
         issuer_name=inst.name,
@@ -375,7 +400,9 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         payload=event.payload,
         merkle_root=onchain["merkle_root"],
         onchain_status=onchain_status,
-        checks=checks
+        checks=checks,
+        layered_checks=layered_checks,
+        consistency_errors=consistency_errors
     )
 
 
@@ -452,3 +479,29 @@ async def revoke_credential(cred_id: uuid.UUID, db: AsyncSession = Depends(get_d
         status="REVOKED",
         message="Credential revoked successfully on-chain."
     )
+
+
+# 8. DELETE /api/v1/permissions/{id} -> Student revokes a share pass
+@app.delete("/api/v1/permissions/{permission_id}")
+async def revoke_share_pass(permission_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    perm_stmt = select(Permission).filter(Permission.id == permission_id)
+    perm_res = await db.execute(perm_stmt)
+    permission = perm_res.scalar_one_or_none()
+    if not permission:
+        raise HTTPException(status_code=404, detail="Permission pass not found")
+        
+    if permission.is_revoked:
+        return {"message": "Permission already revoked"}
+        
+    permission.is_revoked = True
+    await db.commit()
+    
+    await log_audit_async(
+        db,
+        actor_id=str(permission.student_id),
+        action="REVOKE_VERIFIER_SHARE_PASS",
+        target_id=str(permission.credential_id),
+        details={"permission_id": str(permission_id)}
+    )
+    return {"message": "Share pass revoked successfully"}
+

@@ -61,9 +61,9 @@ class ShareResponse(BaseModel):
     access_token: str
     expires_at: datetime
 
-# Verification schemas
 class VerifyResponse(BaseModel):
     status: str  # 'AUTHENTIC' | 'REVOKED' | 'TAMPERING_DETECTED'
+    result: str  # 'verified' | 'revoked' | 'tampered' | 'review' | 'expired'
     student_name: str
     matriculation_no: str
     issuer_name: str
@@ -74,6 +74,8 @@ class VerifyResponse(BaseModel):
     merkle_root: str
     onchain_status: str
     checks: Dict[str, bool]
+    layered_checks: Dict[str, bool]
+    consistency_errors: List[str]
 
 # Tamper simulation schemas
 class TamperSimulateRequest(BaseModel):

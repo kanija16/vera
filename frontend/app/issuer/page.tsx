@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, FileText, Plus, Database, AlertCircle, CheckCircle, Search, Trash2, ArrowRight } from "lucide-react";
 
-const API_URL = "http://localhost:8000/api";
+const API_URL = "http://localhost:8000/api/v1";
 
 export default function UniversityConsole() {
   const DEMO_INSTITUTIONS = [
@@ -26,8 +26,8 @@ export default function UniversityConsole() {
 
   // Form states
   const [newEventStudentId, setNewEventStudentId] = useState(DEMO_STUDENTS[0].id);
-  const [newEventType, setNewEventType] = useState("semester_lock");
-  const [eventPayloadStr, setEventPayloadStr] = useState('{\n  "semester": "Semester 4",\n  "gpa": "9.21",\n  "credits_earned": "24"\n}');
+  const [newEventType, setNewEventType] = useState("SEMESTER_FINAL");
+  const [eventPayloadStr, setEventPayloadStr] = useState('{\n  "semester": "Semester 4",\n  "gpa": "9.21",\n  "credits": 24\n}');
   
   // Revocation Modal states
   const [revokingCredId, setRevokingCredId] = useState<string | null>(null);
@@ -63,9 +63,9 @@ export default function UniversityConsole() {
         {
           event_id: "c-mock-new-event-1",
           student_name: "Bob Jones",
-          event_type: "semester_lock",
+          event_type: "SEMESTER_FINAL",
           event_date: "2026-08-21T12:00:00Z",
-          payload: { semester: "Semester 5", gpa: "8.78", credits_earned: "20" }
+          payload: { semester: "Semester 5", gpa: "8.78", credits: "20" }
         }
       ]);
 
@@ -86,7 +86,7 @@ export default function UniversityConsole() {
       { time: "2026-08-21T12:00:00Z", actor: "System", action: "Database Initialized" }
     ]);
     setActiveEvents([
-      { event_id: "c-mock-new-event-1", student_name: "Bob Jones", event_type: "semester_lock", event_date: "2026-08-21T12:00:00Z", payload: { semester: "Semester 5", gpa: "8.78", credits_earned: "20" } }
+      { event_id: "c-mock-new-event-1", student_name: "Bob Jones", event_type: "SEMESTER_FINAL", event_date: "2026-08-21T12:00:00Z", payload: { semester: "Semester 5", gpa: "8.78", credits: "20" } }
     ]);
   };
 
@@ -269,9 +269,9 @@ export default function UniversityConsole() {
                   onChange={(e) => setNewEventType(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded-lg p-2.5 focus:outline-none focus:border-blue-500/50"
                 >
-                  <option value="semester_lock">Semester Grade Log (transcript)</option>
-                  <option value="convocation">Graduation Convocation (degree)</option>
-                  <option value="migration">Migration Allocation (migration_certificate)</option>
+                  <option value="SEMESTER_FINAL">Semester Grade Log (SEMESTER_FINAL)</option>
+                  <option value="DEGREE_AWARD">Graduation Convocation (DEGREE_AWARD)</option>
+                  <option value="MIGRATION_REQ">Migration Allocation (MIGRATION_REQ)</option>
                 </select>
               </div>
 

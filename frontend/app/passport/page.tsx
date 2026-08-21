@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ShieldCheck, Award, Calendar, Clock, Eye, Trash2, CheckCircle2, AlertTriangle, XCircle, Share2, QrCode, Copy, ChevronDown } from "lucide-react";
 
 // API Base URL
-const API_URL = "http://localhost:8000/api";
+const API_URL = "http://localhost:8000/api/v1";
 
 export default function StudentPassport() {
   // Hardcoded seeded students for easy demo selection

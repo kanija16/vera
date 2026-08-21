@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ShieldCheck, Play, RotateCcw, AlertTriangle, Eye } from "lucide-react";
 
-const API_URL = "http://localhost:8000/api";
+const API_URL = "http://localhost:8000/api/v1";
 
 export default function DemoSandbox() {
   const [loading, setLoading] = useState(false);
