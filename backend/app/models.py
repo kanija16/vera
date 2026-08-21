@@ -1,7 +1,7 @@
 import uuid
 import json
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, TEXT, JSON
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, TEXT, JSON, Float, Integer
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -54,13 +54,26 @@ class SafeArray(TypeDecorator):
 class Institution(Base):
     __tablename__ = 'institution'
     
-    institution_id = Column(UUID_TYPE := String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    institution_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String, nullable=False)
     wallet_address = Column(String, nullable=False, unique=True)
-    status = Column(String, default='VERIFIED')  # 'PENDING' | 'VERIFIED' | 'SUSPENDED'
+    status = Column(String, default='VERIFIED')  # 'PENDING' | 'VERIFIED' | 'SUSPENDED' | 'REVOKED'
     
     events = relationship("AcademicEvent", back_populates="institution")
     credentials = relationship("Credential", back_populates="institution")
+    issuers = relationship("AuthorizedIssuer", back_populates="institution")
+
+
+class AuthorizedIssuer(Base):
+    __tablename__ = 'authorized_issuer'
+    
+    issuer_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    institution_id = Column(String, ForeignKey('institution.institution_id'), nullable=False)
+    wallet_address = Column(String, nullable=False, unique=True)
+    role = Column(String, nullable=False)  # 'registrar' | 'exam_officer'
+    is_active = Column(Boolean, default=True)
+    
+    institution = relationship("Institution", back_populates="issuers")
 
 
 class Student(Base):
@@ -68,9 +81,20 @@ class Student(Base):
     
     student_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     full_name = Column(String, nullable=False)
-    identity_ref = Column(String, unique=True, nullable=True)
+    identity_ref = Column(String, unique=True, nullable=True) # Roll Number
     wallet_address = Column(String, unique=True, nullable=True)
+    dob = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    
+    # Official Source-of-Truth Fields (Item 3 in spec)
+    degree = Column(String, nullable=True)
+    department = Column(String, nullable=True)
+    cgpa = Column(Float, nullable=True)
+    credits_completed = Column(Integer, default=0)
+    graduation_status = Column(String, default='enrolled')  # 'enrolled' | 'graduated'
+    graduation_year = Column(Integer, nullable=True)
+    certificate_number = Column(String, unique=True, nullable=True)
+    migration_status = Column(String, default='none')  # 'none' | 'migrated'
     
     events = relationship("AcademicEvent", back_populates="student")
     credentials = relationship("Credential", back_populates="student")

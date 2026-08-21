@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.database import engine, get_db, SessionLocal
-from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, VerificationEvent, AuditEvent, CredentialRelationship
+from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, VerificationEvent, AuditEvent, CredentialRelationship, AuthorizedIssuer
 from app.schemas import AcademicEventCreate, CredentialRevokeRequest, SharePassCreate, SharePassResponse, TamperRequest, TokenVerificationResponse
 from app.merkle import MerkleTreeEngine
 from app.crypto import sign_hash, verify_signature
@@ -21,7 +21,7 @@ app = FastAPI(title="VERA Academic Trust API", version="1.0.0")
 # CORS middleware configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In hackathon allow all, easy frontend connect
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,7 +32,6 @@ app.add_middleware(
 def startup_db_init():
     print("Connecting database and ensuring tables exist...")
     Base.metadata.create_all(bind=engine)
-    # Trigger seed if empty
     db = SessionLocal()
     try:
         if db.query(Institution).first() is None:
@@ -76,7 +75,7 @@ def log_academic_event(inst_id: str, event_in: AcademicEventCreate, db: Session 
         institution_id=inst_id,
         event_type=event_in.event_type,
         payload=event_in.payload,
-        event_date=event_in.event_date.replace(tzinfo=None), # Naive comparison
+        event_date=event_in.event_date.replace(tzinfo=None),
         triggered_issuance=False
     )
     db.add(event)
@@ -89,17 +88,35 @@ def log_academic_event(inst_id: str, event_in: AcademicEventCreate, db: Session 
 
 # 2. POST /api/institutions/{id}/events/{event_id}/finalize - Batch auto-issuance trigger
 @app.post("/api/institutions/{inst_id}/events/{event_id}/finalize")
-def finalize_event_and_issue(inst_id: str, event_id: str, db: Session = Depends(get_db)):
+def finalize_event_and_issue(inst_id: str, event_id: str, issuer_wallet: Optional[str] = None, db: Session = Depends(get_db)):
     inst = db.query(Institution).filter(Institution.institution_id == inst_id).first()
     if not inst:
         raise HTTPException(status_code=404, detail="Institution not found")
         
-    # Mandatory Check: Fake/unverified institutions cannot issue credentials
+    # Mandatory Check (Demo 3): Fake/unverified institutions cannot issue credentials
     if inst.status != "VERIFIED":
         raise HTTPException(
             status_code=403, 
             detail=f"Unauthorized: Institution status is {inst.status}. Only VERIFIED institutions can finalize credentials."
         )
+        
+    # Authorized Issuer Authentication (Item 2 in spec & Demo 3)
+    # If issuer_wallet is passed, verify it is registered and active for the institution
+    if issuer_wallet:
+        active_issuer = db.query(AuthorizedIssuer).filter(
+            AuthorizedIssuer.wallet_address == issuer_wallet,
+            AuthorizedIssuer.institution_id == inst_id,
+            AuthorizedIssuer.is_active == True
+        ).first()
+        if not active_issuer:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Unauthorized Issuer: Wallet address '{issuer_wallet}' is not registered or active as an examiner for this institution."
+            )
+        issuer_actor = f"Issuer ({active_issuer.role}): {issuer_wallet[:8]}..."
+    else:
+        # Fallback to default registrar wallet for backward compatibility
+        issuer_actor = f"Registrar (Admin): {inst.wallet_address[:8]}..."
         
     event = db.query(AcademicEvent).filter(
         AcademicEvent.event_id == event_id, 
@@ -125,7 +142,66 @@ def finalize_event_and_issue(inst_id: str, event_id: str, db: Session = Depends(
         
     # Retrieve student details
     student = db.query(Student).filter(Student.student_id == event.student_id).first()
-    
+    if not student:
+        raise HTTPException(status_code=404, detail="Student associated with event not found")
+
+    # -------------------------------------------------------------
+    # 🔍 ACADEMIC TRUTH VERIFICATION ENGINE (Item 4 in spec & Demo 4)
+    # -------------------------------------------------------------
+    # Rule 4a: Student profile mismatch validations
+    # Check if student name matches
+    payload_name = event.payload.get("student_name")
+    if payload_name and payload_name.strip().lower() != student.full_name.strip().lower():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Academic Truth Mismatch: Student name '{payload_name}' does not match official database record '{student.full_name}'"
+        )
+        
+    # Rule 4b: Cumulative GPA validations
+    payload_gpa = event.payload.get("gpa")
+    if payload_gpa:
+        try:
+            if abs(float(payload_gpa) - student.cgpa) > 0.01:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Academic Truth Mismatch: Cumulative GPA '{payload_gpa}' does not match official record '{student.cgpa}' ( issuance blocked )"
+                )
+        except ValueError:
+            raise HTTPException(status_code=400, detail="GPA in payload must be a numeric value")
+
+    # Rule 4c: Degree program validations
+    payload_degree = event.payload.get("degree") or event.payload.get("program")
+    if payload_degree and payload_degree.strip().lower() != student.degree.strip().lower():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Academic Truth Mismatch: Degree program '{payload_degree}' does not match official record '{student.degree}'"
+        )
+
+    # Rule 4d: Check if migration certificate has already been issued
+    if cred_type == "migration_certificate" and student.migration_status == "migrated":
+        # Check if they already have an active migration credential
+        existing_mig = db.query(Credential).filter(
+            Credential.student_id == student.student_id,
+            Credential.credential_type == "migration_certificate",
+            Credential.status == "active"
+        ).first()
+        if existing_mig:
+            raise HTTPException(
+                status_code=422,
+                detail="Academic Truth Mismatch: Migration Certificate has already been issued to this student."
+            )
+
+    # Rule 4e: Check duplicate certificate number
+    payload_cert = event.payload.get("certificate_number")
+    if payload_cert:
+        dup = db.query(Student).filter(Student.certificate_number == payload_cert).first()
+        if dup and dup.student_id != student.student_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Academic Truth Mismatch: Duplicate Certificate Number '{payload_cert}' detected."
+            )
+    # -------------------------------------------------------------
+
     # Construct core credential fields
     cred_fields = {
         "student_name": student.full_name,
@@ -139,7 +215,6 @@ def finalize_event_and_issue(inst_id: str, event_id: str, db: Session = Depends(
         
     # Consistency check check BEFORE anchoring
     consistency_engine = AcademicConsistencyEngine(db)
-    # Evaluate new credential
     new_cred_eval = {
         "type": cred_type,
         "issuanceDate": datetime.utcnow().isoformat()
@@ -161,14 +236,14 @@ def finalize_event_and_issue(inst_id: str, event_id: str, db: Session = Depends(
     
     # Smart contract / Blockchain anchor
     tx_hash = BlockchainAttestor.anchor_credential(
-        credential_id=event_id, # Link it to event uuid as credential uuid
+        credential_id=event_id,
         merkle_root=merkle_root,
         institution_wallet=inst.wallet_address
     )
     
     # Save the credential
     credential = Credential(
-        credential_id=event_id, # Match credential ID with source event ID for simplicity
+        credential_id=event_id,
         student_id=student.student_id,
         institution_id=inst.institution_id,
         credential_type=cred_type,
@@ -187,7 +262,7 @@ def finalize_event_and_issue(inst_id: str, event_id: str, db: Session = Depends(
     db.add(credential)
     db.commit()
     
-    log_audit(db, actor=inst.name, action=f"Issued Credential ({cred_type})", object_id=credential.credential_id)
+    log_audit(db, actor=issuer_actor, action=f"Issued Credential ({cred_type})", object_id=credential.credential_id)
     return {
         "message": f"Credential ({cred_type}) issued successfully",
         "credential_id": credential.credential_id,
@@ -231,19 +306,16 @@ def get_student_credentials(student_id: str, db: Session = Depends(get_db)):
         
     creds = db.query(Credential).filter(Credential.student_id == student_id).all()
     
-    # Generate list of credentials with simple status indicator
     result = []
     for c in creds:
-        # Run local consistency check to show dynamic warning
+        # Run local consistency check to show warning flags
         consistency_engine = AcademicConsistencyEngine(db)
         eval_dict = {
             "type": c.credential_type,
             "issuanceDate": c.issued_at.isoformat()
         }
-        # Run check
         is_consistent, errors = consistency_engine.evaluate_new_credential(student_id, eval_dict)
         
-        # Override status to 'review' if inconsistent (but not revoked)
         current_status = c.status
         if current_status == "active" and not is_consistent:
             current_status = "review"
@@ -276,17 +348,15 @@ def share_credential(cred_id: str, share_in: SharePassCreate, db: Session = Depe
     if not cred:
         raise HTTPException(status_code=404, detail="Credential not found")
         
-    # Calculate duration
     duration_map = {
         "1h": timedelta(hours=1),
         "24h": timedelta(days=1),
         "7d": timedelta(days=7),
-        "forever": timedelta(days=3650) # ~10 years
+        "forever": timedelta(days=3650)
     }
     delta = duration_map.get(share_in.duration, timedelta(days=1))
     expires_at = datetime.utcnow() + delta
     
-    # Generate unique URL-safe verification token
     token = secrets.token_urlsafe(24)
     
     permission = Permission(
@@ -316,7 +386,6 @@ def share_credential(cred_id: str, share_in: SharePassCreate, db: Session = Depe
 # 6. GET /api/verify/{token} - Public verifier portal verification endpoint
 @app.get("/api/verify/{token}")
 def verify_token(token: str, db: Session = Depends(get_db)):
-    # 1. Fetch permission pass
     permission = db.query(Permission).filter(Permission.verification_pass_token == token).first()
     if not permission:
         raise HTTPException(status_code=404, detail="Verification pass not found")
@@ -328,7 +397,6 @@ def verify_token(token: str, db: Session = Depends(get_db)):
     student = db.query(Student).filter(Student.student_id == cred.student_id).first()
     inst = db.query(Institution).filter(Institution.institution_id == cred.institution_id).first()
     
-    # Execute checks in strict order:
     layered_checks = {}
     
     # (1) Permission validity (not expired or student revoked)
@@ -337,23 +405,17 @@ def verify_token(token: str, db: Session = Depends(get_db)):
     layered_checks["permission_valid"] = not (is_expired or is_revoked)
     
     # (2) On-chain status active
-    # Query smart contract state on-chain
     onchain = BlockchainAttestor.get_onchain_status(cred.credential_id)
-    # Check if active and match root
     onchain_active = onchain.get("active", True)
     layered_checks["onchain_status_active"] = onchain_active and (cred.status == "active")
     
     # (3) Merkle proof recomputation per disclosed field
-    # We construct a simulated proof disclosure payload.
-    # For the verifier, we only show disclosed fields + their proofs
     disclosed_fields = {}
     merkle_proofs = {}
     proof_verification_success = True
     
-    # Instantiate the Merkle engine on full fields to generate proofs
     full_merkle = MerkleTreeEngine(cred.fields, cred.salts)
     
-    # Iterate permitted fields
     for field in permission.fields_allowed:
         if field in cred.fields:
             val = cred.fields[field]
@@ -367,7 +429,6 @@ def verify_token(token: str, db: Session = Depends(get_db)):
                 "proof": proof
             }
             
-            # Verify the proof locally
             local_verify = MerkleTreeEngine.verify_proof(
                 target_key=field,
                 target_value=val,
@@ -380,7 +441,7 @@ def verify_token(token: str, db: Session = Depends(get_db)):
                 
     layered_checks["merkle_proof_valid"] = proof_verification_success
     
-    # (4) Student identity linkage (check student is valid in DB)
+    # (4) Student identity linkage
     layered_checks["student_identity_linked"] = student is not None
     
     # (5) Consistency Engine Rule 1 check
@@ -395,7 +456,6 @@ def verify_token(token: str, db: Session = Depends(get_db)):
     # (6) Final aggregate state calculation
     final_result = "verified"
     
-    # Order of priority: Revoked -> Tampered -> Review -> Verified
     if not layered_checks["permission_valid"]:
         final_result = "expired"
     elif not layered_checks["onchain_status_active"]:
@@ -447,7 +507,6 @@ def simulate_tamper(req: TamperRequest, db: Session = Depends(get_db)):
     if req.field_to_tamper not in cred.fields:
         raise HTTPException(status_code=400, detail=f"Field '{req.field_to_tamper}' not found in credential payload")
         
-    # Mutate the field in database
     updated_fields = dict(cred.fields)
     updated_fields[req.field_to_tamper] = req.new_value
     cred.fields = updated_fields
@@ -484,7 +543,6 @@ def get_access_history(student_id: str, db: Session = Depends(get_db)):
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
         
-    # Query permissions and their verification events
     history = db.query(VerificationEvent, Permission, Credential)\
         .join(Permission, VerificationEvent.permission_id == Permission.permission_id)\
         .join(Credential, Permission.credential_id == Credential.credential_id)\
@@ -511,12 +569,10 @@ def get_access_history(student_id: str, db: Session = Depends(get_db)):
 # 10. GET /api/institutions/{id}/audit-trail - Institutional audit log
 @app.get("/api/institutions/{inst_id}/audit-trail")
 def get_audit_trail(inst_id: str, db: Session = Depends(get_db)):
-    # Verify institution exists
     inst = db.query(Institution).filter(Institution.institution_id == inst_id).first()
     if not inst:
         raise HTTPException(status_code=404, detail="Institution not found")
         
-    # Query audit events
     events = db.query(AuditEvent).order_by(AuditEvent.timestamp.desc()).all()
     
     result = []

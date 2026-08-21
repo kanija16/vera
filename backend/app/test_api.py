@@ -12,11 +12,9 @@ def setup_module(module):
             os.remove("./test_api.db")
         except Exception:
             pass
-    # Create tables
     Base.metadata.create_all(bind=engine)
 
 def teardown_module(module):
-    # Cleanup database
     engine.dispose()
     if os.path.exists("./test_api.db"):
         try:
@@ -48,8 +46,9 @@ def test_vera_api_integration():
             "event_type": "semester_lock",
             "payload": {
                 "semester": "Semester 3",
-                "gpa": "9.12",
-                "credits_earned": "24"
+                "gpa": "9.43", # Matches Alice's seeded CGPA 9.43 exactly
+                "credits_earned": "24",
+                "program": "B.Tech Computer Science" # Matches Alice's seeded degree program exactly
             },
             "event_date": "2023-12-15T10:00:00"
         }
@@ -59,16 +58,68 @@ def test_vera_api_integration():
         event_id = event_data["event_id"]
         assert event_id is not None
         print("  [PASS] Successfully logged new academic event.")
+
+        # 2b. Demo 4 Check: Log an event with Mismatched GPA (Database has 9.43, we submit 9.95)
+        bad_event_payload = {
+            "student_id": alice_id,
+            "event_type": "semester_lock",
+            "payload": {
+                "semester": "Semester 3",
+                "gpa": "9.95", # Mismatched GPA!
+                "credits_earned": "24",
+                "program": "B.Tech Computer Science"
+            },
+            "event_date": "2023-12-15T10:00:00"
+        }
+        response = client.post(f"/api/institutions/{inst_id}/events", json=bad_event_payload)
+        assert response.status_code == 201
+        bad_event_id = response.json()["event_id"]
+
+        # Finalizing mismatched event MUST BE BLOCKED by Academic Truth Engine
+        response = client.post(f"/api/institutions/{inst_id}/events/{bad_event_id}/finalize")
+        assert response.status_code == 422
+        assert "Academic Truth Mismatch" in response.json()["detail"]
+        print("  [PASS] Academic Truth Engine successfully blocked GPA data mismatch (Demo 4).")
+
+        # 2c. Demo 3 Check: Finalizing with an unauthorized issuer wallet MUST BE BLOCKED
+        fake_issuer_wallet = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        response = client.post(f"/api/institutions/{inst_id}/events/{event_id}/finalize?issuer_wallet={fake_issuer_wallet}")
+        assert response.status_code == 403
+        assert "Unauthorized Issuer" in response.json()["detail"]
+        print("  [PASS] Successfully blocked finalization by unauthorized issuer wallet.")
+
+        # 2d. Demo 3 Check: Finalizing via a PENDING/Unverified institution MUST BE BLOCKED
+        unverified_inst_id = "a2222222-2222-2222-2222-222222222222"
+        unverified_event_payload = {
+            "student_id": alice_id,
+            "event_type": "semester_lock",
+            "payload": {
+                "semester": "Semester 3",
+                "gpa": "9.43",
+                "credits_earned": "24",
+                "program": "B.Tech Computer Science"
+            },
+            "event_date": "2023-12-15T10:00:00"
+        }
+        response = client.post(f"/api/institutions/{unverified_inst_id}/events", json=unverified_event_payload)
+        assert response.status_code == 201
+        unverified_event_id = response.json()["event_id"]
+
+        response = client.post(f"/api/institutions/{unverified_inst_id}/events/{unverified_event_id}/finalize")
+        assert response.status_code == 403
+        assert "Only VERIFIED institutions can finalize" in response.json()["detail"]
+        print("  [PASS] Successfully blocked finalization for unverified institution status.")
         
-        # 3. Test POST /api/institutions/{id}/events/{id}/finalize (Finalize and Issue Credential)
-        response = client.post(f"/api/institutions/{inst_id}/events/{event_id}/finalize")
+        # 3. Test POST /api/institutions/{id}/events/{id}/finalize with authorized issuer wallet
+        authorized_issuer_wallet = "0x8888888888888888888888888888888888888888"
+        response = client.post(f"/api/institutions/{inst_id}/events/{event_id}/finalize?issuer_wallet={authorized_issuer_wallet}")
         assert response.status_code == 200
         issue_data = response.json()
         cred_id = issue_data["credential_id"]
         assert cred_id == event_id
         assert issue_data["merkle_root"] is not None
         assert issue_data["onchain_tx_hash"].startswith("0x")
-        print("  [PASS] Successfully finalized event and issued credential.")
+        print("  [PASS] Successfully finalized event and issued credential using authorized issuer wallet.")
         
         # 4. Test POST /api/credentials/{id}/share (Create Selective Disclosure Share Pass)
         share_payload = {
@@ -104,7 +155,7 @@ def test_vera_api_integration():
         tamper_payload = {
             "credential_id": cred_id,
             "field_to_tamper": "gpa",
-            "new_value": "9.95" # Original was 9.12
+            "new_value": "9.95" # Original was 9.43
         }
         response = client.post("/api/verify/tamper-simulate", json=tamper_payload)
         assert response.status_code == 200
@@ -121,7 +172,7 @@ def test_vera_api_integration():
         restore_payload = {
             "credential_id": cred_id,
             "field_to_tamper": "gpa",
-            "new_value": "9.12"
+            "new_value": "9.43"
         }
         client.post("/api/verify/tamper-simulate", json=restore_payload)
         
@@ -151,7 +202,7 @@ def test_vera_api_integration():
         response = client.get(f"/api/institutions/{inst_id}/audit-trail")
         assert response.status_code == 200
         audit_data = response.json()
-        assert len(audit_data["audit_logs"]) >= 3 # Log event, Finalize, Revoke actions
+        assert len(audit_data["audit_logs"]) >= 6 # Events logged, checks, revokes
         print("  [PASS] Successfully retrieved institutional audit trails.")
         
         print("All VERA Core API Integration Tests Passed! [100% SUCCESS]")

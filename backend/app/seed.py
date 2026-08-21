@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 from app.database import engine, SessionLocal
-from app.models import Base, Institution, Student, AcademicEvent, Credential
+from app.models import Base, Institution, Student, AcademicEvent, Credential, AuthorizedIssuer
 from app.merkle import MerkleTreeEngine
 
 def seed_db():
@@ -33,40 +33,96 @@ def seed_db():
         )
         db.add_all([inst1, inst2])
         
-        # 2. Students
+        # 2. Authorized Issuers (Item 2 in spec)
+        iss1 = AuthorizedIssuer(
+            issuer_id="e1111111-1111-1111-1111-111111111111",
+            institution_id=inst1.institution_id,
+            wallet_address="0x8888888888888888888888888888888888888888",
+            role="exam_officer",
+            is_active=True
+        )
+        iss2 = AuthorizedIssuer(
+            issuer_id="e2222222-2222-2222-2222-222222222222",
+            institution_id=inst1.institution_id,
+            wallet_address="0x9999999999999999999999999999999999999999",
+            role="registrar",
+            is_active=True
+        )
+        db.add_all([iss1, iss2])
+        
+        # 3. Students with Source-of-Truth Data (Item 3 in spec)
         s1 = Student(
             student_id="b1111111-1111-1111-1111-111111111111",
             full_name="Alice Smith",
             identity_ref="CS-2022-001",
-            wallet_address="0x3333333333333333333333333333333333333333"
+            wallet_address="0x3333333333333333333333333333333333333333",
+            dob="2004-05-14",
+            degree="B.Tech Computer Science",
+            department="CSE",
+            cgpa=9.43,
+            credits_completed=180,
+            graduation_status="graduated",
+            graduation_year=2026,
+            certificate_number="CERT-10001",
+            migration_status="none"
         )
         s2 = Student(
             student_id="b2222222-2222-2222-2222-222222222222",
             full_name="Bob Jones",
             identity_ref="CS-2022-002",
-            wallet_address="0x4444444444444444444444444444444444444444"
+            wallet_address="0x4444444444444444444444444444444444444444",
+            dob="2004-11-22",
+            degree="B.Tech Computer Science",
+            department="CSE",
+            cgpa=8.78,
+            credits_completed=120,
+            graduation_status="enrolled",
+            migration_status="none"
         )
         s3 = Student(
             student_id="b3333333-3333-3333-3333-333333333333",
             full_name="Charlie Brown",
             identity_ref="CS-2022-003",
-            wallet_address="0x5555555555555555555555555555555555555555"
+            wallet_address="0x5555555555555555555555555555555555555555",
+            dob="2004-02-18",
+            degree="B.Tech Computer Science",
+            department="CSE",
+            cgpa=7.52,
+            credits_completed=120,
+            graduation_status="enrolled",
+            migration_status="none"
         )
         s4 = Student(
             student_id="b4444444-4444-4444-4444-444444444444",
             full_name="David Green",
             identity_ref="CS-2022-004",
-            wallet_address="0x6666666666666666666666666666666666666666"
+            wallet_address="0x6666666666666666666666666666666666666666",
+            dob="2004-08-30",
+            degree="B.Tech Computer Science",
+            department="CSE",
+            cgpa=8.15,
+            credits_completed=120,
+            graduation_status="enrolled",
+            migration_status="none"
         )
         s5 = Student(
             student_id="b5555555-5555-5555-5555-555555555555",
             full_name="Emily White",
             identity_ref="CS-2022-005",
-            wallet_address="0x7777777777777777777777777777777777777777"
+            wallet_address="0x7777777777777777777777777777777777777777",
+            dob="2004-09-05",
+            degree="B.Tech Computer Science",
+            department="CSE",
+            cgpa=8.50,
+            credits_completed=180,
+            graduation_status="graduated",
+            graduation_year=2026,
+            certificate_number="CERT-10005",
+            migration_status="migrated"
         )
         db.add_all([s1, s2, s3, s4, s5])
         
-        # 3. Emily White's Inconsistent Record (Migration pre-dates Admission)
+        # 4. Emily White's Inconsistent Record (Migration pre-dates Admission)
         # Event 1: Admission
         adm_event = AcademicEvent(
             event_id="c1111111-1111-1111-1111-111111111111",
@@ -97,9 +153,8 @@ def seed_db():
         db.commit()
         
         # Generate credentials for Emily White
-        # We need to compile Merkle trees and sign them
         
-        # 3a. Admission Credential for Emily
+        # 4a. Admission Credential for Emily
         adm_fields = {
             "student_name": s5.full_name,
             "roll_number": s5.identity_ref,
@@ -113,7 +168,7 @@ def seed_db():
             credential_id="d1111111-1111-1111-1111-111111111111",
             student_id=s5.student_id,
             institution_id=inst1.institution_id,
-            credential_type="transcript", # For Rule 1 Admission check
+            credential_type="transcript",
             fields=adm_fields,
             salts=adm_salts,
             merkle_root=adm_merkle.get_root().hex(),
@@ -124,7 +179,7 @@ def seed_db():
         )
         db.add(c_adm)
         
-        # 3b. Inconsistent Migration Credential for Emily
+        # 4b. Inconsistent Migration Credential for Emily
         mig_fields = {
             "student_name": s5.full_name,
             "roll_number": s5.identity_ref,
@@ -143,14 +198,14 @@ def seed_db():
             salts=mig_salts,
             merkle_root=mig_merkle.get_root().hex(),
             onchain_tx_hash="0xmocktxhash222222222222222222222222222222222222222222222222222",
-            issued_at=datetime(2021, 6, 1, tzinfo=timezone.utc), # INCONSISTENT DATE
+            issued_at=datetime(2021, 6, 1, tzinfo=timezone.utc),
             status="active",
             source_event_id=mig_event.event_id
         )
         db.add(c_mig)
         
         db.commit()
-        print("Database successfully seeded with institutions, students, and Emily's inconsistent record.")
+        print("Database successfully seeded with academic source-of-truth records.")
         
     except Exception as e:
         db.rollback()
