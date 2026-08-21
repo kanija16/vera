@@ -11,11 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.database import engine, get_db, AsyncSessionLocal, bootstrap_database
-from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus
-from app.schemas import EventCreate, EventResponse, FinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse
-from app.services.crypto import build_merkle_tree, generate_hmac_token, verify_hmac_token, verify_merkle_proof, canonicalize_json, generate_merkle_proof
+from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch
+from app.schemas import EventCreate, EventResponse, FinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse
+from app.services.crypto import build_merkle_tree, generate_hmac_token, verify_hmac_token, verify_merkle_proof, canonicalize_json, generate_merkle_proof, sign_message_ecdsa, verify_signature_ecdsa
 from app.services.validator import ConsistencyAnomalyEngine
-from app.services.blockchain import BlockchainLedgerSimulator
+from app.services.blockchain import BlockchainLedgerSimulator, blockchain_service
 from app.seed import seed_db
 
 app = FastAPI(title="VERA v1 Cryptographic Academic Trust Network", version="1.0.0")
@@ -67,7 +67,6 @@ async def create_institution(payload: Dict[str, Any], db: AsyncSession = Depends
     if not code:
         raise HTTPException(status_code=400, detail="Institution code required")
     
-    # Check if duplicate code
     dup_stmt = select(Institution).filter(Institution.code == code)
     dup_res = await db.execute(dup_stmt)
     if dup_res.scalar_one_or_none() is not None:
@@ -204,15 +203,22 @@ async def list_student_events(student_id: uuid.UUID, db: AsyncSession = Depends(
     return [{"id": e.id, "event_type": e.event_type, "payload": e.payload, "trust_score": e.trust_score, "status": e.status, "created_at": e.created_at} for e in events]
 
 
-# 5. POST /api/v1/institutions/{inst_id}/events/{event_id}/finalize -> Finalize & Anchor
-@app.post("/api/v1/institutions/{inst_id}/events/{event_id}/finalize", response_model=FinalizeResponse)
-async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    inst_stmt = select(Institution).filter(Institution.id == inst_id)
-    inst_res = await db.execute(inst_stmt)
-    inst = inst_res.scalar_one_or_none()
-    if not inst:
-        raise HTTPException(status_code=404, detail="Institution not found")
+# 5a. POST /api/v1/institutions/{inst_id}/events/{event_id}/propose -> Clerk Proposal (Stage 1 Governance)
+@app.post("/api/v1/institutions/{inst_id}/events/{event_id}/propose", response_model=ProposeResponse)
+async def propose_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ProposeRequest, db: AsyncSession = Depends(get_db)):
+    # Check Clerk
+    clerk_stmt = select(InstitutionOfficer).filter(
+        InstitutionOfficer.id == req.clerk_id,
+        InstitutionOfficer.institution_id == inst_id,
+        InstitutionOfficer.role == "CLERK",
+        InstitutionOfficer.is_active == True
+    )
+    clerk_res = await db.execute(clerk_stmt)
+    clerk = clerk_res.scalar_one_or_none()
+    if not clerk:
+        raise HTTPException(status_code=404, detail="Active clerk officer not found for this institution.")
         
+    # Check Event
     event_stmt = select(AcademicEvent).filter(
         AcademicEvent.id == event_id,
         AcademicEvent.institution_id == inst_id
@@ -220,37 +226,108 @@ async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSessi
     event_res = await db.execute(event_stmt)
     event = event_res.scalar_one_or_none()
     if not event:
-        raise HTTPException(status_code=404, detail="Academic event not found")
+        raise HTTPException(status_code=404, detail="Academic event not found.")
         
-    if event.status != EventStatus.VALID.value:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot finalize event: status is '{event.status}'. Must be 'VALID'."
+    # Check if suspicious review
+    if event.status == EventStatus.SUSPICIOUS_REVIEW.value or event.trust_score < 0.85:
+        raise HTTPException(status_code=400, detail="Cannot propose suspicious academic events. Consistency review required.")
+        
+    # Check if already authorized or proposed
+    auth_stmt = select(CredentialAuthorization).filter(CredentialAuthorization.event_id == event_id)
+    auth_res = await db.execute(auth_stmt)
+    auth = auth_res.scalar_one_or_none()
+    if auth and auth.status in ("CLERK_SIGNED", "DUAL_AUTHORIZED"):
+        raise HTTPException(status_code=400, detail="Credential is already proposed or authorized.")
+        
+    # Generate Clerk signature
+    payload_bytes = canonicalize_json(event.payload)
+    signature = sign_message_ecdsa(clerk.private_key, payload_bytes)
+    
+    if not auth:
+        auth = CredentialAuthorization(
+            event_id=event_id,
+            clerk_id=clerk.id,
+            clerk_signature=signature,
+            clerk_signed_at=datetime.utcnow(),
+            status="CLERK_SIGNED"
         )
+        db.add(auth)
+    else:
+        auth.clerk_id = clerk.id
+        auth.clerk_signature = signature
+        auth.clerk_signed_at = datetime.utcnow()
+        auth.status = "CLERK_SIGNED"
         
-    existing_cred_stmt = select(Credential).filter(Credential.event_id == event_id)
-    existing_cred_res = await db.execute(existing_cred_stmt)
-    if existing_cred_res.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=400, detail="Event already finalized and anchored.")
-        
-    # Generate random salts for each field for privacy-preserving salted Merkle Tree
-    salts = {k: secrets.token_hex(16) for k in event.payload.keys()}
+    event.status = "CLERK_SIGNED"
+    await db.commit()
+    await db.refresh(auth)
     
-    # 1. Canonicalization
-    canonical_payload_bytes = canonicalize_json(event.payload)
-    canonical_hash = hashlib.sha256(canonical_payload_bytes).hexdigest()
-    
-    # 2. Construct Salted Merkle Tree
-    leaf_hashes, merkle_root = build_merkle_tree(event.payload, salts)
-    
-    # 3. Anchor to thread-safe blockchain ledger simulator
-    ledger_record = BlockchainLedgerSimulator.anchor_credential(
-        credential_id=str(event_id),
-        merkle_root=merkle_root,
-        institution_id=str(inst_id)
+    await log_audit_async(
+        db,
+        actor_id=clerk.name,
+        action="CLERK_PROPOSAL_SIGNATURE",
+        target_id=str(event_id),
+        details={"signature": signature}
     )
     
-    # 4. Save Credential with salts
+    return ProposeResponse(
+        event_id=event_id,
+        clerk_id=clerk.id,
+        clerk_signature=signature,
+        status="CLERK_SIGNED"
+    )
+
+
+# 5b. POST /api/v1/institutions/{inst_id}/events/{event_id}/approve -> Exam Officer Approval (Stage 2 Governance)
+@app.post("/api/v1/institutions/{inst_id}/events/{event_id}/approve", response_model=ApproveResponse)
+async def approve_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ApproveRequest, db: AsyncSession = Depends(get_db)):
+    # Check Exam Officer
+    officer_stmt = select(InstitutionOfficer).filter(
+        InstitutionOfficer.id == req.exam_officer_id,
+        InstitutionOfficer.institution_id == inst_id,
+        InstitutionOfficer.role == "EXAM_OFFICER",
+        InstitutionOfficer.is_active == True
+    )
+    officer_res = await db.execute(officer_stmt)
+    officer = officer_res.scalar_one_or_none()
+    if not officer:
+        raise HTTPException(status_code=404, detail="Active exam officer not found for this institution.")
+        
+    # Check Event
+    event_stmt = select(AcademicEvent).filter(
+        AcademicEvent.id == event_id,
+        AcademicEvent.institution_id == inst_id
+    )
+    event_res = await db.execute(event_stmt)
+    event = event_res.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Academic event not found.")
+        
+    # Check Proposal Authorization status
+    auth_stmt = select(CredentialAuthorization).filter(CredentialAuthorization.event_id == event_id)
+    auth_res = await db.execute(auth_stmt)
+    auth = auth_res.scalar_one_or_none()
+    if not auth or auth.status != "CLERK_SIGNED":
+        raise HTTPException(status_code=400, detail="Event must have a valid clerk proposal signature before officer approval.")
+        
+    # Pre-signature verification
+    payload_bytes = canonicalize_json(event.payload)
+    
+    # Generate Exam Officer signature
+    signature = sign_message_ecdsa(officer.private_key, payload_bytes)
+    
+    auth.exam_officer_id = officer.id
+    auth.exam_officer_signature = signature
+    auth.exam_officer_approved_at = datetime.utcnow()
+    auth.status = "DUAL_AUTHORIZED"
+    
+    event.status = "ISSUED"
+    
+    # Create Credential with salted leaves
+    salts = {k: secrets.token_hex(16) for k in event.payload.keys()}
+    leaf_hashes, merkle_root = build_merkle_tree(event.payload, salts)
+    canonical_hash = hashlib.sha256(payload_bytes).hexdigest()
+    
     credential = Credential(
         id=event_id,
         event_id=event_id,
@@ -264,22 +341,143 @@ async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSessi
     )
     db.add(credential)
     await db.commit()
+    await db.refresh(auth)
     
     await log_audit_async(
         db,
-        actor_id=inst.code,
-        action="FINALIZE_AND_ANCHOR_CREDENTIAL",
-        target_id=str(credential.id),
-        details={"merkle_root": merkle_root, "ledger_record": ledger_record}
+        actor_id=officer.name,
+        action="EXAM_OFFICER_APPROVAL_SIGNATURE",
+        target_id=str(event_id),
+        details={"signature": signature}
     )
+    
+    return ApproveResponse(
+        credential_id=credential.id,
+        exam_officer_id=officer.id,
+        exam_officer_signature=signature,
+        merkle_root=merkle_root,
+        status="DUAL_AUTHORIZED"
+    )
+
+
+# 5c. POST /api/v1/institutions/{inst_id}/anchor-batch -> Batch Anchoring Commitment
+@app.post("/api/v1/institutions/{inst_id}/anchor-batch", response_model=BatchAnchorResponse)
+async def anchor_batch(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    # Query all credentials from this institution not yet batched (batch_id is null)
+    stmt = select(Credential).join(AcademicEvent, Credential.event_id == AcademicEvent.id).filter(
+        AcademicEvent.institution_id == inst_id,
+        Credential.batch_id == None
+    )
+    res = await db.execute(stmt)
+    credentials = res.scalars().all()
+    if not credentials:
+        raise HTTPException(status_code=400, detail="No credentials currently queued for batch anchoring.")
+        
+    # Build Batch Merkle commitment
+    roots = [c.merkle_root for c in credentials]
+    sorted_roots = sorted(roots)
+    current_layer = [bytes.fromhex(r) for r in sorted_roots]
+    
+    while len(current_layer) > 1:
+        next_layer = []
+        for i in range(0, len(current_layer), 2):
+            left = current_layer[i]
+            right = current_layer[i+1] if i + 1 < len(current_layer) else left
+            next_layer.append(hashlib.sha256(left + right).digest())
+        current_layer = next_layer
+    batch_root = current_layer[0].hex() if current_layer else ""
+    
+    # Commit Batch Root to smart contract registry
+    ledger_record = BlockchainLedgerSimulator.anchor_credential(
+        credential_id=str(uuid.uuid4()),
+        merkle_root=batch_root,
+        institution_id=str(inst_id)
+    )
+    
+    # Store AnchorBatch details
+    batch = AnchorBatch(
+        id=uuid.uuid4(),
+        institution_id=inst_id,
+        batch_root=batch_root,
+        status="ANCHORED",
+        tx_hash=ledger_record["tx_hash"],
+        created_at=datetime.utcnow()
+    )
+    db.add(batch)
+    await db.commit()
+    await db.refresh(batch)
+    
+    # Update credentials with batch ID and activate simulated on-chain index
+    for c in credentials:
+        c.batch_id = batch.id
+        BlockchainLedgerSimulator.anchor_credential(
+            credential_id=str(c.id),
+            merkle_root=c.merkle_root,
+            institution_id=str(inst_id)
+        )
+    await db.commit()
+    
+    await log_audit_async(
+        db,
+        actor_id="SYSTEM_BATCH_ANCHORER",
+        action="BATCH_ANCHOR_COMMITMENT",
+        target_id=str(batch.id),
+        details={"batch_root": batch_root, "size": len(credentials)}
+    )
+    
+    return BatchAnchorResponse(
+        batch_id=batch.id,
+        batch_root=batch_root,
+        size=len(credentials),
+        status="ANCHORED",
+        tx_hash=ledger_record["tx_hash"]
+    )
+
+
+# 5d. POST /api/v1/institutions/{inst_id}/events/{event_id}/finalize -> E2E finalize wrapper (triggers full flow)
+@app.post("/api/v1/institutions/{inst_id}/events/{event_id}/finalize", response_model=FinalizeResponse)
+async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    # Find active clerk and officer keys for this institution
+    clerk_stmt = select(InstitutionOfficer).filter(
+        InstitutionOfficer.institution_id == inst_id,
+        InstitutionOfficer.role == "CLERK",
+        InstitutionOfficer.is_active == True
+    )
+    clerk_res = await db.execute(clerk_stmt)
+    clerk = clerk_res.scalar_one_or_none()
+    
+    officer_stmt = select(InstitutionOfficer).filter(
+        InstitutionOfficer.institution_id == inst_id,
+        InstitutionOfficer.role == "EXAM_OFFICER",
+        InstitutionOfficer.is_active == True
+    )
+    officer_res = await db.execute(officer_stmt)
+    officer = officer_res.scalar_one_or_none()
+    
+    if not clerk or not officer:
+        raise HTTPException(status_code=400, detail="Institution must have active clerk and exam officer registered to finalize.")
+        
+    # Execute full E2E flow automatically
+    await propose_event(inst_id, event_id, ProposeRequest(clerk_id=clerk.id), db)
+    await approve_event(inst_id, event_id, ApproveRequest(exam_officer_id=officer.id), db)
+    batch_res = await anchor_batch(inst_id, db)
+    
+    cred_stmt = select(Credential).filter(Credential.id == event_id)
+    cred_res = await db.execute(cred_stmt)
+    credential = cred_res.scalar_one()
     
     return FinalizeResponse(
         credential_id=credential.id,
-        merkle_root=merkle_root,
-        canonical_payload_hash=canonical_hash,
+        merkle_root=credential.merkle_root,
+        canonical_payload_hash=credential.canonical_payload_hash,
         status=credential.status,
         version=credential.version,
-        blockchain_tx=ledger_record
+        blockchain_tx={
+            "merkle_root": credential.merkle_root,
+            "batch_root": batch_res.batch_root,
+            "tx_hash": batch_res.tx_hash,
+            "anchor_type": "LOCAL_DEMO" if blockchain_service.__class__.__name__ == "DevelopmentAnchorService" else "REAL_TESTNET"
+        }
     )
 
 
@@ -326,20 +524,37 @@ async def share_credential(cred_id: uuid.UUID, share_in: ShareRequest, db: Async
     if credential.status != CredentialStatus.ACTIVE.value:
         raise HTTPException(status_code=400, detail="Cannot share inactive or revoked credential.")
         
-    expires_at_timestamp = time.time() + share_in.expires_in_seconds
+    verifier_email = share_in.verifier_email
+    if not verifier_email:
+        label = share_in.verifier_label or "verifier"
+        verifier_email = f"{label.lower().replace(' ', '_')}@example.com"
+        
+    expires_in = share_in.expires_in_seconds or 86400
+    if share_in.duration:
+        d = share_in.duration.lower()
+        if d == "1h":
+            expires_in = 3600
+        elif d == "24h":
+            expires_in = 86400
+        elif d == "7d":
+            expires_in = 604800
+        elif d == "forever":
+            expires_in = 3153600000  # 100 years
+            
+    expires_at_timestamp = time.time() + expires_in
     expires_at_datetime = datetime.utcfromtimestamp(expires_at_timestamp).replace(tzinfo=timezone.utc)
     
     token = generate_hmac_token(
         credential_id=str(cred_id),
         student_id=str(credential.student_id),
-        verifier_email=share_in.verifier_email,
+        verifier_email=verifier_email,
         expires_at=expires_at_timestamp
     )
     
     permission = Permission(
         credential_id=cred_id,
         student_id=credential.student_id,
-        verifier_email=share_in.verifier_email,
+        verifier_email=verifier_email,
         access_token=token,
         fields_allowed=share_in.fields_allowed,
         expires_at=expires_at_datetime.replace(tzinfo=None),
@@ -354,7 +569,7 @@ async def share_credential(cred_id: uuid.UUID, share_in: ShareRequest, db: Async
         actor_id=str(credential.student_id),
         action="SHARE_CREDENTIAL_GENERATE_TOKEN",
         target_id=str(cred_id),
-        details={"verifier_email": share_in.verifier_email, "fields_allowed": share_in.fields_allowed, "expires_at": expires_at_datetime.isoformat()}
+        details={"verifier_email": verifier_email, "fields_allowed": share_in.fields_allowed, "expires_at": expires_at_datetime.isoformat()}
     )
     
     return ShareResponse(
@@ -469,6 +684,28 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
             event_date=event.created_at
         )
 
+    # Layer 6 Audit Check: Validate double clerk + exam officer signatures
+    auth_stmt = select(CredentialAuthorization).filter(CredentialAuthorization.event_id == credential.event_id)
+    auth_res = await db.execute(auth_stmt)
+    auth = auth_res.scalar_one_or_none()
+    
+    has_valid_signatures = False
+    if auth and auth.status == "DUAL_AUTHORIZED":
+        cl_stmt = select(InstitutionOfficer).filter(InstitutionOfficer.id == auth.clerk_id)
+        cl_res = await db.execute(cl_stmt)
+        clerk = cl_res.scalar_one_or_none()
+        
+        ex_stmt = select(InstitutionOfficer).filter(InstitutionOfficer.id == auth.exam_officer_id)
+        ex_res = await db.execute(ex_stmt)
+        exam_officer = ex_res.scalar_one_or_none()
+        
+        if clerk and exam_officer:
+            payload_bytes = canonicalize_json(event.payload)
+            is_cl_ok = verify_signature_ecdsa(clerk.public_key, payload_bytes, auth.clerk_signature)
+            is_ex_ok = verify_signature_ecdsa(exam_officer.public_key, payload_bytes, auth.exam_officer_signature)
+            if is_cl_ok and is_ex_ok:
+                has_valid_signatures = True
+
     if not checks["On-Chain Credential Status Active"]:
         verification_status = "REVOKED"
         result_state = "revoked"
@@ -484,7 +721,8 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         "On-Chain Credential Status Active": (onchain_status == "ACTIVE"),
         "Merkle Proof Integrity Valid": True,
         "Student Identity Matching": True,
-        "Timeline Consistency Checked": (event.status != EventStatus.SUSPICIOUS_REVIEW.value)
+        "Timeline Consistency Checked": (event.status != EventStatus.SUSPICIOUS_REVIEW.value),
+        "Cryptographic Audit Integrity": has_valid_signatures
     }
 
     # Selective Disclosure Logic: filter down payload to allowed fields

@@ -75,6 +75,22 @@ class Institution(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     events = relationship("AcademicEvent", back_populates="institution", cascade="all, delete-orphan")
+    officers = relationship("InstitutionOfficer", back_populates="institution", cascade="all, delete-orphan")
+    batches = relationship("AnchorBatch", back_populates="institution", cascade="all, delete-orphan")
+
+
+class InstitutionOfficer(Base):
+    __tablename__ = 'institution_officer'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey('institution.id'), nullable=False)
+    name = Column(String, nullable=False)
+    role = Column(String, nullable=False)  # 'CLERK' | 'EXAM_OFFICER'
+    public_key = Column(String, nullable=False)  # ECDSA public key PEM
+    private_key = Column(String, nullable=False)  # Kept in database for demo simulation signatures
+    is_active = Column(Boolean, default=True)
+    
+    institution = relationship("Institution", back_populates="officers")
 
 
 class Student(Base):
@@ -107,6 +123,7 @@ class AcademicEvent(Base):
     institution = relationship("Institution", back_populates="events")
     student = relationship("Student", back_populates="events")
     credential = relationship("Credential", back_populates="source_event", uselist=False, cascade="all, delete-orphan")
+    authorization = relationship("CredentialAuthorization", back_populates="event", uselist=False, cascade="all, delete-orphan")
 
 
 class Credential(Base):
@@ -115,9 +132,10 @@ class Credential(Base):
     id = Column(GUID, primary_key=True, default=uuid.uuid4)
     event_id = Column(GUID, ForeignKey('academic_event.id'), nullable=False)
     student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
+    batch_id = Column(GUID, ForeignKey('anchor_batch.id'), nullable=True)  # Associated batch anchor
     merkle_root = Column(String, nullable=False)
     canonical_payload_hash = Column(String, nullable=False)
-    salts = Column(SafeJSONB, nullable=False)  # Added column for privacy-preserving verification
+    salts = Column(SafeJSONB, nullable=False)
     status = Column(String, default="ACTIVE")  # Map to CredentialStatus enum
     version = Column(Integer, default=1)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
@@ -125,6 +143,39 @@ class Credential(Base):
     source_event = relationship("AcademicEvent", back_populates="credential")
     student = relationship("Student", back_populates="credentials")
     permissions = relationship("Permission", back_populates="credential", cascade="all, delete-orphan")
+    batch = relationship("AnchorBatch", back_populates="credentials")
+
+
+class CredentialAuthorization(Base):
+    __tablename__ = 'credential_authorization'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    event_id = Column(GUID, ForeignKey('academic_event.id'), nullable=False)
+    clerk_id = Column(GUID, ForeignKey('institution_officer.id'), nullable=True)
+    clerk_signature = Column(String, nullable=True)
+    clerk_signed_at = Column(DateTime, nullable=True)
+    exam_officer_id = Column(GUID, ForeignKey('institution_officer.id'), nullable=True)
+    exam_officer_signature = Column(String, nullable=True)
+    exam_officer_approved_at = Column(DateTime, nullable=True)
+    status = Column(String, default="DRAFT")  # 'DRAFT' | 'PROPOSED' | 'CLERK_SIGNED' | 'DUAL_AUTHORIZED'
+    
+    event = relationship("AcademicEvent", back_populates="authorization")
+    clerk = relationship("InstitutionOfficer", foreign_keys=[clerk_id])
+    exam_officer = relationship("InstitutionOfficer", foreign_keys=[exam_officer_id])
+
+
+class AnchorBatch(Base):
+    __tablename__ = 'anchor_batch'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey('institution.id'), nullable=False)
+    batch_root = Column(String, nullable=False)
+    status = Column(String, default="QUEUED")  # 'QUEUED' | 'ANCHORED'
+    tx_hash = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    
+    institution = relationship("Institution", back_populates="batches")
+    credentials = relationship("Credential", back_populates="batch")
 
 
 class CredentialRelationship(Base):
@@ -144,7 +195,7 @@ class Permission(Base):
     student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
     verifier_email = Column(String, nullable=False)
     access_token = Column(String, nullable=False, unique=True)
-    fields_allowed = Column(SafeJSONB, nullable=False)  # Added column for selective disclosure config
+    fields_allowed = Column(SafeJSONB, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_revoked = Column(Boolean, default=False)
     

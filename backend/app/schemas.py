@@ -23,6 +23,33 @@ class EventResponse(BaseModel):
     class Config:
         from_attributes = True
 
+# Governance schemas
+class ProposeRequest(BaseModel):
+    clerk_id: UUID
+
+class ProposeResponse(BaseModel):
+    event_id: UUID
+    clerk_id: UUID
+    clerk_signature: str
+    status: str
+
+class ApproveRequest(BaseModel):
+    exam_officer_id: UUID
+
+class ApproveResponse(BaseModel):
+    credential_id: UUID
+    exam_officer_id: UUID
+    exam_officer_signature: str
+    merkle_root: str
+    status: str
+
+class BatchAnchorResponse(BaseModel):
+    batch_id: UUID
+    batch_root: str
+    size: int
+    status: str
+    tx_hash: str
+
 # Finalize response schemas
 class FinalizeResponse(BaseModel):
     credential_id: UUID
@@ -53,8 +80,10 @@ class StudentCredentialsResponse(BaseModel):
 
 # Share permission schemas
 class ShareRequest(BaseModel):
-    verifier_email: EmailStr
-    expires_in_seconds: int = Field(86400, ge=60, description="Duration of token validity in seconds")
+    verifier_email: Optional[str] = None
+    verifier_label: Optional[str] = None
+    expires_in_seconds: Optional[int] = None
+    duration: Optional[str] = None
     fields_allowed: List[str] = Field(default_factory=list, description="Fields chosen to share selectively")
 
 class ShareResponse(BaseModel):

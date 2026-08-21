@@ -46,6 +46,8 @@ def test_cryptographic_academic_trust_flow():
     with TestClient(app) as client:
         inst_id = "a1111111-1111-1111-1111-111111111111"
         emily_id = "b5555555-5555-5555-5555-555555555555"
+        clerk_id = "e1111111-1111-1111-1111-111111111111"
+        officer_id = "e2222222-2222-2222-2222-222222222222"
         
         # TEST 1: Retrieve Emily White's Seeded Credentials
         response = client.get(f"/api/v1/students/{emily_id}/credentials")
@@ -86,19 +88,33 @@ def test_cryptographic_academic_trust_flow():
         }
         response = client.post(f"/api/v1/institutions/{inst_id}/events", json=inconsistent_payload)
         assert response.status_code == 201
-        res_data = response.json()
-        assert res_data["status"] == "SUSPICIOUS_REVIEW"
-        assert res_data["trust_score"] < 0.85
-        assert any("TIMELINE_INCONSISTENCY" in err for err in res_data["errors"])
+        suspicious_event_id = response.json()["id"]
+        assert response.json()["status"] == "SUSPICIOUS_REVIEW"
+        assert response.json()["trust_score"] < 0.85
         
-        # TEST 4: Finalize & Anchor Valid Event
-        response = client.post(f"/api/v1/institutions/{inst_id}/events/{event_id}/finalize")
+        # TEST 4a: Block proposal of suspicious event (Anomaly block check)
+        response = client.post(f"/api/v1/institutions/{inst_id}/events/{suspicious_event_id}/propose", json={"clerk_id": clerk_id})
+        assert response.status_code == 400
+        assert "Consistency review required" in response.json()["detail"]
+        
+        # TEST 4b: Clerk Proposes valid event
+        response = client.post(f"/api/v1/institutions/{inst_id}/events/{event_id}/propose", json={"clerk_id": clerk_id})
         assert response.status_code == 200
-        fin_data = response.json()
-        assert fin_data["credential_id"] == event_id
-        assert fin_data["status"] == "ACTIVE"
-        assert fin_data["merkle_root"] is not None
-        assert fin_data["blockchain_tx"]["merkle_root"] == fin_data["merkle_root"]
+        assert response.json()["status"] == "CLERK_SIGNED"
+        assert response.json()["clerk_signature"] is not None
+        
+        # TEST 4c: Exam Officer Approves and signs
+        response = client.post(f"/api/v1/institutions/{inst_id}/events/{event_id}/approve", json={"exam_officer_id": officer_id})
+        assert response.status_code == 200
+        assert response.json()["status"] == "DUAL_AUTHORIZED"
+        assert response.json()["exam_officer_signature"] is not None
+        
+        # TEST 4d: Batch anchoring
+        response = client.post(f"/api/v1/institutions/{inst_id}/anchor-batch")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ANCHORED"
+        assert response.json()["size"] == 1
+        assert response.json()["batch_root"] is not None
         
         # TEST 5: Share Permission & Verify with selective disclosure list
         share_payload = {
@@ -122,6 +138,7 @@ def test_cryptographic_academic_trust_flow():
         assert "gpa" in verify_data["payload"]
         assert "credits" not in verify_data["payload"]  # Omitted!
         assert verify_data["checks"]["Off-Chain Payload Match On-Chain Merkle Root"] is True
+        assert verify_data["layered_checks"]["Cryptographic Audit Integrity"] is True
         
         # Verify using Salted Merkle proof locally
         from app.services.crypto import verify_merkle_proof

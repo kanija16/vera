@@ -6,8 +6,8 @@ import hashlib
 from datetime import datetime
 from sqlalchemy.future import select
 from app.database import engine, AsyncSessionLocal, bootstrap_database
-from app.models import Base, Institution, Student, AcademicEvent, Credential, EventType, EventStatus, CredentialStatus
-from app.services.crypto import build_merkle_tree, generate_ecdsa_keypair, canonicalize_json
+from app.models import Base, Institution, Student, AcademicEvent, Credential, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch
+from app.services.crypto import build_merkle_tree, generate_ecdsa_keypair, canonicalize_json, sign_message_ecdsa
 from app.services.blockchain import BlockchainLedgerSimulator
 
 async def seed_db():
@@ -33,6 +33,53 @@ async def seed_db():
             print("[SEED] Seeded VERA Institute of Technology.")
         else:
             print("[SEED] VERA Institute of Technology already exists.")
+
+        # 1b. Seed Officers for VERA-TECH (Clerk and Exam Officer)
+        officer_stmt = select(InstitutionOfficer).filter(InstitutionOfficer.institution_id == inst.id)
+        officer_res = await db.execute(officer_stmt)
+        officers = officer_res.scalars().all()
+        if not officers:
+            # Clerk
+            cl_priv, cl_pub = generate_ecdsa_keypair()
+            clerk = InstitutionOfficer(
+                id=uuid.UUID("e1111111-1111-1111-1111-111111111111"),
+                institution_id=inst.id,
+                name="Clerk Jane",
+                role="CLERK",
+                public_key=cl_pub,
+                private_key=cl_priv,
+                is_active=True
+            )
+            # Exam Officer
+            ex_priv, ex_pub = generate_ecdsa_keypair()
+            exam_officer = InstitutionOfficer(
+                id=uuid.UUID("e2222222-2222-2222-2222-222222222222"),
+                institution_id=inst.id,
+                name="Officer John",
+                role="EXAM_OFFICER",
+                public_key=ex_pub,
+                private_key=ex_priv,
+                is_active=True
+            )
+            db.add_all([clerk, exam_officer])
+            await db.commit()
+            print("[SEED] Seeded Clerk and Exam Officer officers.")
+        else:
+            clerk = next(o for o in officers if o.role == "CLERK")
+            exam_officer = next(o for o in officers if o.role == "EXAM_OFFICER")
+
+        # Create a seeded anchor batch for initial credentials
+        batch_id = uuid.uuid4()
+        seeded_batch = AnchorBatch(
+            id=batch_id,
+            institution_id=inst.id,
+            batch_root="0xseededbatchrootinitial1111222233334444555566667777888899990000a",
+            status="ANCHORED",
+            tx_hash="0xseededbatchtxhash",
+            created_at=datetime.utcnow()
+        )
+        db.add(seeded_batch)
+        await db.commit()
 
         # 2. Seed Student Alice Smith (Consistent student)
         alice_stmt = select(Student).filter(Student.email == "alice.smith@example.com")
@@ -92,8 +139,26 @@ async def seed_db():
             db.add(e3)
             await db.commit()
             
-            # Generate credentials for Alice
+            # Generate credentials and authorizations for Alice
             for event in [e1, e2, e3]:
+                payload_bytes = canonicalize_json(event.payload)
+                cl_sig = sign_message_ecdsa(clerk.private_key, payload_bytes)
+                ex_sig = sign_message_ecdsa(exam_officer.private_key, payload_bytes)
+                
+                # Create auth
+                auth = CredentialAuthorization(
+                    event_id=event.id,
+                    clerk_id=clerk.id,
+                    clerk_signature=cl_sig,
+                    clerk_signed_at=datetime.utcnow(),
+                    exam_officer_id=exam_officer.id,
+                    exam_officer_signature=ex_sig,
+                    exam_officer_approved_at=datetime.utcnow(),
+                    status="DUAL_AUTHORIZED"
+                )
+                db.add(auth)
+                event.status = "ISSUED"
+                
                 # Generate salts
                 salts = {k: secrets.token_hex(16) for k in event.payload.keys()}
                 leaf_hashes, merkle_root = build_merkle_tree(event.payload, salts)
@@ -110,8 +175,9 @@ async def seed_db():
                     id=event.id,
                     event_id=event.id,
                     student_id=alice.id,
+                    batch_id=batch_id, # Link to seeded batch!
                     merkle_root=merkle_root,
-                    canonical_payload_hash=hashlib.sha256(canonicalize_json(event.payload)).hexdigest(),
+                    canonical_payload_hash=hashlib.sha256(payload_bytes).hexdigest(),
                     salts=salts,
                     status=CredentialStatus.ACTIVE.value,
                     version=1,
@@ -167,7 +233,24 @@ async def seed_db():
             db.add(e_emily_2)
             await db.commit()
             
-            # Generate credentials for Emily White's Valid events only
+            # Generate credentials and authorizations for Emily White's Valid events only
+            payload_bytes = canonicalize_json(e_emily_1.payload)
+            cl_sig = sign_message_ecdsa(clerk.private_key, payload_bytes)
+            ex_sig = sign_message_ecdsa(exam_officer.private_key, payload_bytes)
+            
+            auth_emily = CredentialAuthorization(
+                event_id=e_emily_1.id,
+                clerk_id=clerk.id,
+                clerk_signature=cl_sig,
+                clerk_signed_at=datetime.utcnow(),
+                exam_officer_id=exam_officer.id,
+                exam_officer_signature=ex_sig,
+                exam_officer_approved_at=datetime.utcnow(),
+                status="DUAL_AUTHORIZED"
+            )
+            db.add(auth_emily)
+            e_emily_1.status = "ISSUED"
+            
             salts = {k: secrets.token_hex(16) for k in e_emily_1.payload.keys()}
             leaf_hashes, merkle_root = build_merkle_tree(e_emily_1.payload, salts)
             BlockchainLedgerSimulator.anchor_credential(
@@ -179,8 +262,9 @@ async def seed_db():
                 id=e_emily_1.id,
                 event_id=e_emily_1.id,
                 student_id=emily.id,
+                batch_id=batch_id, # Link to seeded batch!
                 merkle_root=merkle_root,
-                canonical_payload_hash=hashlib.sha256(canonicalize_json(e_emily_1.payload)).hexdigest(),
+                canonical_payload_hash=hashlib.sha256(payload_bytes).hexdigest(),
                 salts=salts,
                 status=CredentialStatus.ACTIVE.value,
                 version=1,
