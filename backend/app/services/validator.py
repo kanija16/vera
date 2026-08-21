@@ -146,6 +146,7 @@ async def seed_emily_white(db):
         name="Amrita University",
         code="AMRITA-UNIV",
         public_key="MOCK_PUBLIC_KEY_PEM_AMRITA",
+        status="ACCREDITED",
         is_verified=True,
         created_at=datetime(2022, 1, 1)
     )

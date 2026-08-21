@@ -24,6 +24,7 @@ async def seed_db():
                 name="VERA Institute of Technology",
                 code="VERA-TECH",
                 public_key=public_key,
+                status="ACCREDITED",
                 is_verified=True,
                 created_at=datetime(2022, 1, 1)
             )

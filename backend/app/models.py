@@ -71,6 +71,7 @@ class Institution(Base):
     name = Column(String, nullable=False)
     code = Column(String, nullable=False, unique=True)
     public_key = Column(String, nullable=False)
+    status = Column(String, default="PENDING")  # 'PENDING' | 'ACCREDITED' | 'SUSPENDED' | 'REVOKED'
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     

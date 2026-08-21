@@ -73,16 +73,18 @@ async def create_institution(payload: Dict[str, Any], db: AsyncSession = Depends
         raise HTTPException(status_code=400, detail="Institution code already exists")
         
     _, public_key = generate_ecdsa_keypair()
+    is_verified_val = payload.get("is_verified", True)
     inst = Institution(
         name=payload.get("name", "Unnamed Institution"),
         code=code,
         public_key=public_key,
-        is_verified=payload.get("is_verified", True)
+        status="ACCREDITED" if is_verified_val else "PENDING",
+        is_verified=is_verified_val
     )
     db.add(inst)
     await db.commit()
     await db.refresh(inst)
-    return {"id": inst.id, "name": inst.name, "code": inst.code, "is_verified": inst.is_verified}
+    return {"id": inst.id, "name": inst.name, "code": inst.code, "status": inst.status, "is_verified": inst.is_verified}
 
 
 # 1b. GET /api/v1/institutions -> List institutions
@@ -91,7 +93,34 @@ async def list_institutions(db: AsyncSession = Depends(get_db)):
     stmt = select(Institution)
     res = await db.execute(stmt)
     institutions = res.scalars().all()
-    return [{"id": i.id, "name": i.name, "code": i.code, "is_verified": i.is_verified} for i in institutions]
+    return [{"id": i.id, "name": i.name, "code": i.code, "status": i.status, "is_verified": i.is_verified} for i in institutions]
+
+
+# 1c. POST /api/v1/institutions/{inst_id}/status -> Update institution status (ACCREDITED/SUSPENDED/etc.)
+@app.post("/api/v1/institutions/{inst_id}/status")
+async def update_institution_status(inst_id: uuid.UUID, payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    status_val = payload.get("status")
+    if not status_val or status_val not in ("PENDING", "ACCREDITED", "SUSPENDED", "REVOKED"):
+        raise HTTPException(status_code=400, detail="Invalid status. Must be PENDING, ACCREDITED, SUSPENDED, or REVOKED.")
+        
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+        
+    inst.status = status_val
+    inst.is_verified = (status_val == "ACCREDITED")
+    await db.commit()
+    
+    await log_audit_async(
+        db,
+        actor_id="SYSTEM_ADMIN",
+        action="UPDATE_INSTITUTION_STATUS",
+        target_id=str(inst_id),
+        details={"status": status_val}
+    )
+    return {"id": inst.id, "name": inst.name, "code": inst.code, "status": inst.status, "is_verified": inst.is_verified}
 
 
 # 2a. POST /api/v1/students -> Create student
@@ -206,6 +235,15 @@ async def list_student_events(student_id: uuid.UUID, db: AsyncSession = Depends(
 # 5a. POST /api/v1/institutions/{inst_id}/events/{event_id}/propose -> Clerk Proposal (Stage 1 Governance)
 @app.post("/api/v1/institutions/{inst_id}/events/{event_id}/propose", response_model=ProposeResponse)
 async def propose_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ProposeRequest, db: AsyncSession = Depends(get_db)):
+    # Check Institution Accreditation
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=400, detail="Only ACCREDITED institutions can propose credentials.")
+
     # Check Clerk
     clerk_stmt = select(InstitutionOfficer).filter(
         InstitutionOfficer.id == req.clerk_id,
@@ -281,6 +319,15 @@ async def propose_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ProposeReq
 # 5b. POST /api/v1/institutions/{inst_id}/events/{event_id}/approve -> Exam Officer Approval (Stage 2 Governance)
 @app.post("/api/v1/institutions/{inst_id}/events/{event_id}/approve", response_model=ApproveResponse)
 async def approve_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ApproveRequest, db: AsyncSession = Depends(get_db)):
+    # Check Institution Accreditation
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=400, detail="Only ACCREDITED institutions can approve credentials.")
+
     # Check Exam Officer
     officer_stmt = select(InstitutionOfficer).filter(
         InstitutionOfficer.id == req.exam_officer_id,
@@ -363,6 +410,15 @@ async def approve_event(inst_id: uuid.UUID, event_id: uuid.UUID, req: ApproveReq
 # 5c. POST /api/v1/institutions/{inst_id}/anchor-batch -> Batch Anchoring Commitment
 @app.post("/api/v1/institutions/{inst_id}/anchor-batch", response_model=BatchAnchorResponse)
 async def anchor_batch(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    # Check Institution Accreditation
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=400, detail="Only ACCREDITED institutions can anchor batches.")
+
     # Query all credentials from this institution not yet batched (batch_id is null)
     stmt = select(Credential).join(AcademicEvent, Credential.event_id == AcademicEvent.id).filter(
         AcademicEvent.institution_id == inst_id,
