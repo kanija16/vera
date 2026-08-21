@@ -1,11 +1,38 @@
 import uuid
 import json
+from enum import Enum
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, TEXT, JSON, Float, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Table, Float, Integer, JSON
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 
 Base = declarative_base()
+
+# Platform-independent GUID type mapping
+class GUID(TypeDecorator):
+    impl = String(36)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(PG_UUID(as_uuid=True))
+        else:
+            return dialect.type_descriptor(String(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return value
+        else:
+            return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            return str(value)
 
 # Safe JSONB type mapping
 class SafeJSONB(TypeDecorator):
@@ -19,170 +46,116 @@ class SafeJSONB(TypeDecorator):
         else:
             return dialect.type_descriptor(JSON)
 
-# Safe ARRAY type mapping
-class SafeArray(TypeDecorator):
-    impl = TEXT
-    cache_ok = True
+# Python Enums for DB compatibility
+class EventType(str, Enum):
+    ENROLLMENT = "ENROLLMENT"
+    SEMESTER_FINAL = "SEMESTER_FINAL"
+    DEGREE_AWARD = "DEGREE_AWARD"
+    MIGRATION_REQ = "MIGRATION_REQ"
 
-    def load_dialect_impl(self, dialect):
-        if dialect.name == 'postgresql':
-            from sqlalchemy.dialects.postgresql import ARRAY
-            return dialect.type_descriptor(ARRAY(String))
-        else:
-            return dialect.type_descriptor(TEXT)
+class EventStatus(str, Enum):
+    PENDING = "PENDING"
+    VALID = "VALID"
+    SUSPICIOUS_REVIEW = "SUSPICIOUS_REVIEW"
+    REJECTED = "REJECTED"
 
-    def process_bind_param(self, value, dialect):
-        if value is None:
-            return None
-        if dialect.name == 'postgresql':
-            return value
-        return json.dumps(value)
-
-    def process_result_value(self, value, dialect):
-        if value is None:
-            return None
-        if dialect.name == 'postgresql':
-            return value
-        if isinstance(value, str):
-            try:
-                return json.loads(value)
-            except json.JSONDecodeError:
-                return value
-        return value
+class CredentialStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
 
 
 class Institution(Base):
     __tablename__ = 'institution'
     
-    institution_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False)
-    wallet_address = Column(String, nullable=False, unique=True)
-    status = Column(String, default='VERIFIED')  # 'PENDING' | 'VERIFIED' | 'SUSPENDED' | 'REVOKED'
+    code = Column(String, nullable=False, unique=True)
+    public_key = Column(String, nullable=False)
+    is_verified = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     events = relationship("AcademicEvent", back_populates="institution")
-    credentials = relationship("Credential", back_populates="institution")
-    issuers = relationship("AuthorizedIssuer", back_populates="institution")
-
-
-class AuthorizedIssuer(Base):
-    __tablename__ = 'authorized_issuer'
-    
-    issuer_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    institution_id = Column(String, ForeignKey('institution.institution_id'), nullable=False)
-    wallet_address = Column(String, nullable=False, unique=True)
-    role = Column(String, nullable=False)  # 'registrar' | 'exam_officer'
-    is_active = Column(Boolean, default=True)
-    
-    institution = relationship("Institution", back_populates="issuers")
 
 
 class Student(Base):
     __tablename__ = 'student'
     
-    student_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    full_name = Column(String, nullable=False)
-    identity_ref = Column(String, unique=True, nullable=True) # Roll Number
-    wallet_address = Column(String, unique=True, nullable=True)
-    dob = Column(String, nullable=True)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
+    matriculation_no = Column(String, nullable=False, unique=True)
+    wallet_address = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    
-    # Official Source-of-Truth Fields (Item 3 in spec)
-    degree = Column(String, nullable=True)
-    department = Column(String, nullable=True)
-    cgpa = Column(Float, nullable=True)
-    credits_completed = Column(Integer, default=0)
-    graduation_status = Column(String, default='enrolled')  # 'enrolled' | 'graduated'
-    graduation_year = Column(Integer, nullable=True)
-    certificate_number = Column(String, unique=True, nullable=True)
-    migration_status = Column(String, default='none')  # 'none' | 'migrated'
     
     events = relationship("AcademicEvent", back_populates="student")
     credentials = relationship("Credential", back_populates="student")
+    permissions = relationship("Permission", back_populates="student")
 
 
 class AcademicEvent(Base):
     __tablename__ = 'academic_event'
     
-    event_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    student_id = Column(String, ForeignKey('student.student_id'), nullable=False)
-    institution_id = Column(String, ForeignKey('institution.institution_id'), nullable=False)
-    event_type = Column(String, nullable=False)  # 'admission' | 'semester_lock' | 'convocation' | 'migration'
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey('institution.id'), nullable=False)
+    student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
+    event_type = Column(String, nullable=False)  # Map to EventType enum
     payload = Column(SafeJSONB, nullable=False)
-    event_date = Column(DateTime(timezone=True), nullable=False)
-    finalized_at = Column(DateTime(timezone=True), nullable=True)
-    triggered_issuance = Column(Boolean, default=False)
+    trust_score = Column(Float, default=1.0)
+    status = Column(String, default="PENDING")  # Map to EventStatus enum
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
-    student = relationship("Student", back_populates="events")
     institution = relationship("Institution", back_populates="events")
-    credentials = relationship("Credential", back_populates="source_event")
+    student = relationship("Student", back_populates="events")
+    credential = relationship("Credential", back_populates="source_event", uselist=False)
 
 
 class Credential(Base):
     __tablename__ = 'credential'
     
-    credential_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    student_id = Column(String, ForeignKey('student.student_id'), nullable=False)
-    institution_id = Column(String, ForeignKey('institution.institution_id'), nullable=False)
-    credential_type = Column(String, nullable=False)  # 'transcript' | 'degree' | 'migration_certificate'
-    fields = Column(SafeJSONB, nullable=False)
-    salts = Column(SafeJSONB, nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    event_id = Column(GUID, ForeignKey('academic_event.id'), nullable=False)
+    student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
     merkle_root = Column(String, nullable=False)
-    onchain_tx_hash = Column(String, nullable=True)
-    issued_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    status = Column(String, default='active')  # 'active' | 'revoked'
-    source_event_id = Column(String, ForeignKey('academic_event.event_id'), nullable=True)
+    canonical_payload_hash = Column(String, nullable=False)
+    status = Column(String, default="ACTIVE")  # Map to CredentialStatus enum
+    version = Column(Integer, default=1)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
+    source_event = relationship("AcademicEvent", back_populates="credential")
     student = relationship("Student", back_populates="credentials")
-    institution = relationship("Institution", back_populates="credentials")
-    source_event = relationship("AcademicEvent", back_populates="credentials")
-    
     permissions = relationship("Permission", back_populates="credential")
-    verification_events = relationship("VerificationEvent", back_populates="credential")
 
 
 class CredentialRelationship(Base):
     __tablename__ = 'credential_relationship'
     
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    source_credential_id = Column('source_credential', String, ForeignKey('credential.credential_id'), nullable=False)
-    target_credential_id = Column('target_credential', String, ForeignKey('credential.credential_id'), nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    parent_credential_id = Column(GUID, ForeignKey('credential.id'), nullable=False)
+    child_credential_id = Column(GUID, ForeignKey('credential.id'), nullable=False)
     relationship_type = Column(String, nullable=False)  # 'precedes' | 'supersedes' | 'depends_on'
 
 
 class Permission(Base):
     __tablename__ = 'permission'
     
-    permission_id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    credential_id = Column(String, ForeignKey('credential.credential_id'), nullable=False)
-    verifier_label = Column(String, nullable=True)
-    fields_allowed = Column(SafeArray, nullable=False)
-    verification_pass_token = Column(String, unique=True, nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    credential_id = Column(GUID, ForeignKey('credential.id'), nullable=False)
+    student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
+    verifier_email = Column(String, nullable=False)
+    access_token = Column(String, nullable=False, unique=True)
     expires_at = Column(DateTime(timezone=True), nullable=False)
-    revoked_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    is_revoked = Column(Boolean, default=False)
     
     credential = relationship("Credential", back_populates="permissions")
-    verification_events = relationship("VerificationEvent", back_populates="permission")
+    student = relationship("Student", back_populates="permissions")
 
 
-class VerificationEvent(Base):
-    __tablename__ = 'verification_event'
+class AuditLog(Base):
+    __tablename__ = 'audit_log'
     
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    credential_id = Column(String, ForeignKey('credential.credential_id'), nullable=False)
-    permission_id = Column(String, ForeignKey('permission.permission_id'), nullable=False)
-    result = Column(String, nullable=False)  # 'verified' | 'review' | 'tampered' | 'revoked'
-    checked_at = Column(DateTime(timezone=True), default=datetime.utcnow)
-    
-    credential = relationship("Credential", back_populates="verification_events")
-    permission = relationship("Permission", back_populates="verification_events")
-
-
-class AuditEvent(Base):
-    __tablename__ = 'audit_event'
-    
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    actor = Column(String, nullable=False)
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    actor_id = Column(String, nullable=False)
     action = Column(String, nullable=False)
-    object_id = Column(String, nullable=True)
+    target_id = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow)
+    details = Column(SafeJSONB, nullable=True)
