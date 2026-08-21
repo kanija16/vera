@@ -1,24 +1,28 @@
-﻿# Python virtual environments
-.venv/
-venv/
+# PDF Slide Deck
+Vera_Presentation.pdf
+
+# Python Virtual Environments
 backend/.venv/
+.venv/
 
-# Python cache
+# Python Cache Directories
 __pycache__/
-*.py[cod]
+*.pyc
+backend/app/__pycache__/
+backend/app/services/__pycache__/
 
-# Environment variables
-.env
+# Databases
+backend/*.db
+backend/app/*.db
 
-# IDE
-.vscode/
-.idea/
+# Node / Next.js builds
+frontend/.next/
+frontend/node_modules/
+frontend/out/
+frontend/build/
+.next/
+node_modules/
 
-# OS
+# OS specific files
 .DS_Store
 Thumbs.db
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
