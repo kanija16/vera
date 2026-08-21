@@ -4,35 +4,43 @@ import base64
 import hashlib
 import json
 import time
+import secrets
 from typing import List, Tuple, Dict, Any
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes, serialization
 
 SECRET_KEY = os.getenv("SECRET_KEY", "vera_cryptographic_secret_key_2026")
 
-# 1. Canonicalization (lexicographical sorting of JSON keys)
+# 1. Canonicalization
 def canonicalize_json(payload: Dict[str, Any]) -> bytes:
     return json.dumps(payload, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')
 
-# 2. Balanced binary Merkle Tree builder
-def build_merkle_tree(payload: Dict[str, Any]) -> Tuple[List[str], str]:
-    # Sort keys to ensure deterministic ordering of fields
+# Salted Leaf Hash generator
+def hash_leaf(field_name: str, field_value: Any, salt: str) -> bytes:
+    # SHA256(canonical_field_name + canonical_field_value + unique_salt)
+    field_name_clean = str(field_name).strip()
+    field_val_clean = str(field_value).strip()
+    salt_clean = str(salt).strip()
+    
+    combined = (field_name_clean + field_val_clean + salt_clean).encode('utf-8')
+    return hashlib.sha256(combined).digest()
+
+# 2. Balanced binary Salted Merkle Tree builder
+def build_merkle_tree(payload: Dict[str, Any], salts: Dict[str, str]) -> Tuple[List[str], str]:
     sorted_keys = sorted(payload.keys())
     
-    # Generate leaf hashes: sha256("key:value")
     leaf_hashes = []
     for k in sorted_keys:
         val = payload[k]
-        leaf_content = f"{k}:{val}".encode('utf-8')
-        leaf_hash = hashlib.sha256(leaf_content).hexdigest()
-        leaf_hashes.append(leaf_hash)
+        salt = salts.get(k, "")
+        lh_digest = hash_leaf(k, val, salt)
+        leaf_hashes.append(lh_digest.hex())
         
     if not leaf_hashes:
         return [], ""
         
     current_layer = [bytes.fromhex(lh) for lh in leaf_hashes]
     
-    # Build tree layers sequentially
     while len(current_layer) > 1:
         next_layer = []
         for i in range(0, len(current_layer), 2):
@@ -40,7 +48,7 @@ def build_merkle_tree(payload: Dict[str, Any]) -> Tuple[List[str], str]:
             if i + 1 < len(current_layer):
                 right = current_layer[i+1]
             else:
-                # Balanced tree: duplicate the odd node
+                # Balanced: duplicate odd node
                 right = left
             combined = hashlib.sha256(left + right).digest()
             next_layer.append(combined)
@@ -49,13 +57,13 @@ def build_merkle_tree(payload: Dict[str, Any]) -> Tuple[List[str], str]:
     return leaf_hashes, current_layer[0].hex()
 
 # 3. Generate Merkle Proof for a specific field
-def generate_merkle_proof(payload: Dict[str, Any], target_key: str) -> List[Dict[str, str]]:
+def generate_merkle_proof(payload: Dict[str, Any], salts: Dict[str, str], target_key: str) -> List[Dict[str, str]]:
     sorted_keys = sorted(payload.keys())
     if target_key not in sorted_keys:
         return []
         
     idx = sorted_keys.index(target_key)
-    leaf_hashes = [hashlib.sha256(f"{k}:{payload[k]}".encode('utf-8')).digest() for k in sorted_keys]
+    leaf_hashes = [hash_leaf(k, payload[k], salts.get(k, "")) for k in sorted_keys]
     
     tree = [leaf_hashes]
     current_layer = leaf_hashes
@@ -85,9 +93,8 @@ def generate_merkle_proof(payload: Dict[str, Any], target_key: str) -> List[Dict
     return proof
 
 # 4. Verify Merkle Proof
-def verify_merkle_proof(target_key: str, target_value: str, proof: List[Dict[str, str]], root_hex: str) -> bool:
-    leaf_content = f"{target_key}:{target_value}".encode('utf-8')
-    current_hash = hashlib.sha256(leaf_content).digest()
+def verify_merkle_proof(target_key: str, target_value: Any, salt: str, proof: List[Dict[str, str]], root_hex: str) -> bool:
+    current_hash = hash_leaf(target_key, target_value, salt)
     
     for node in proof:
         sibling = bytes.fromhex(node["hash"])
@@ -114,7 +121,6 @@ def verify_hmac_token(token: str) -> Tuple[bool, Dict[str, Any]]:
             return False, {}
             
         payload_b64, signature = parts
-        # Restore padding
         padding = 4 - (len(payload_b64) % 4)
         decoded_bytes = base64.urlsafe_b64decode(payload_b64 + "=" * padding)
         payload_str = decoded_bytes.decode('utf-8')

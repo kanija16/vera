@@ -55,6 +55,7 @@ class StudentCredentialsResponse(BaseModel):
 class ShareRequest(BaseModel):
     verifier_email: EmailStr
     expires_in_seconds: int = Field(86400, ge=60, description="Duration of token validity in seconds")
+    fields_allowed: List[str] = Field(default_factory=list, description="Fields chosen to share selectively")
 
 class ShareResponse(BaseModel):
     permission_id: UUID
@@ -76,6 +77,8 @@ class VerifyResponse(BaseModel):
     checks: Dict[str, bool]
     layered_checks: Dict[str, bool]
     consistency_errors: List[str]
+    salts: Dict[str, str] = Field(default_factory=dict)
+    merkle_proofs: Dict[str, List[Dict[str, str]]] = Field(default_factory=dict)
 
 # Tamper simulation schemas
 class TamperSimulateRequest(BaseModel):

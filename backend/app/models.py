@@ -74,7 +74,7 @@ class Institution(Base):
     is_verified = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
-    events = relationship("AcademicEvent", back_populates="institution")
+    events = relationship("AcademicEvent", back_populates="institution", cascade="all, delete-orphan")
 
 
 class Student(Base):
@@ -87,9 +87,9 @@ class Student(Base):
     wallet_address = Column(String, nullable=True, unique=True)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
-    events = relationship("AcademicEvent", back_populates="student")
-    credentials = relationship("Credential", back_populates="student")
-    permissions = relationship("Permission", back_populates="student")
+    events = relationship("AcademicEvent", back_populates="student", cascade="all, delete-orphan")
+    credentials = relationship("Credential", back_populates="student", cascade="all, delete-orphan")
+    permissions = relationship("Permission", back_populates="student", cascade="all, delete-orphan")
 
 
 class AcademicEvent(Base):
@@ -106,7 +106,7 @@ class AcademicEvent(Base):
     
     institution = relationship("Institution", back_populates="events")
     student = relationship("Student", back_populates="events")
-    credential = relationship("Credential", back_populates="source_event", uselist=False)
+    credential = relationship("Credential", back_populates="source_event", uselist=False, cascade="all, delete-orphan")
 
 
 class Credential(Base):
@@ -117,13 +117,14 @@ class Credential(Base):
     student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
     merkle_root = Column(String, nullable=False)
     canonical_payload_hash = Column(String, nullable=False)
+    salts = Column(SafeJSONB, nullable=False)  # Added column for privacy-preserving verification
     status = Column(String, default="ACTIVE")  # Map to CredentialStatus enum
     version = Column(Integer, default=1)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     source_event = relationship("AcademicEvent", back_populates="credential")
     student = relationship("Student", back_populates="credentials")
-    permissions = relationship("Permission", back_populates="credential")
+    permissions = relationship("Permission", back_populates="credential", cascade="all, delete-orphan")
 
 
 class CredentialRelationship(Base):
@@ -143,6 +144,7 @@ class Permission(Base):
     student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
     verifier_email = Column(String, nullable=False)
     access_token = Column(String, nullable=False, unique=True)
+    fields_allowed = Column(SafeJSONB, nullable=False)  # Added column for selective disclosure config
     expires_at = Column(DateTime(timezone=True), nullable=False)
     is_revoked = Column(Boolean, default=False)
     

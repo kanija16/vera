@@ -1,9 +1,10 @@
 import os
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 # Retrieve database URL from environment or fallback
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5432/vera")
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgrespassword@db:5432/vera")
 
 # Convert standard postgres/sqlite schemes to async equivalent
 if DATABASE_URL.startswith("postgresql://"):
@@ -35,3 +36,24 @@ async def get_db():
             yield session
         finally:
             await session.close()
+
+# Deterministic database bootstrap logic (clean drop and create)
+async def bootstrap_database(db_engine, force: bool = False):
+    if force or os.getenv("DB_FORCE_BOOTSTRAP", "").lower() == "true":
+        print("[DATABASE] Force bootstrap enabled. Dropping public schema cascade for clean reset...")
+        async with db_engine.begin() as conn:
+            if conn.dialect.name == "postgresql":
+                await conn.execute(text("DROP SCHEMA public CASCADE;"))
+                await conn.execute(text("CREATE SCHEMA public;"))
+                await conn.execute(text("GRANT ALL ON SCHEMA public TO public;"))
+                print("[DATABASE] PostgreSQL public schema cascaded and recreated.")
+            else:
+                from app.models import Base
+                await conn.run_sync(Base.metadata.drop_all)
+                print("[DATABASE] SQLite tables dropped.")
+                
+    # Create all tables asynchronously
+    from app.models import Base
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    print("[DATABASE] Database tables initialized and verified.")

@@ -2,22 +2,23 @@
 Vera_Presentation.pdf
 
 # Python Virtual Environments
-backend/.venv/
+**/.venv/
 .venv/
+venv/
 
 # Python Cache Directories
+**/__pycache__/
 __pycache__/
 *.pyc
-backend/app/__pycache__/
-backend/app/services/__pycache__/
+**/*.pyc
 
 # Databases
-backend/*.db
-backend/app/*.db
+**/*.db
+*.db
 
 # Node / Next.js builds
-frontend/.next/
-frontend/node_modules/
+**/.next/
+**/node_modules/
 frontend/out/
 frontend/build/
 .next/

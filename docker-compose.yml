@@ -19,20 +19,34 @@ services:
       timeout: 5s
       retries: 5
 
-  web:
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     container_name: vera-fastapi-app
     restart: always
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgrespassword@db:5432/vera
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@db:5432/vera
       - SECRET_KEY=vera_cryptographic_secret_key_2026
+      - DB_FORCE_BOOTSTRAP=true
     depends_on:
       db:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vera-nextjs-app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

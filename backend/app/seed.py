@@ -1,218 +1,198 @@
+import os
+import asyncio
 import uuid
-from datetime import datetime, timezone
-from sqlalchemy.orm import Session
-from app.database import engine, SessionLocal
-from app.models import Base, Institution, Student, AcademicEvent, Credential, AuthorizedIssuer
-from app.merkle import MerkleTreeEngine
+import secrets
+import hashlib
+from datetime import datetime
+from sqlalchemy.future import select
+from app.database import engine, AsyncSessionLocal, bootstrap_database
+from app.models import Base, Institution, Student, AcademicEvent, Credential, EventType, EventStatus, CredentialStatus
+from app.services.crypto import build_merkle_tree, generate_ecdsa_keypair, canonicalize_json
+from app.services.blockchain import BlockchainLedgerSimulator
 
-def seed_db():
-    print("Initializing database tables...")
-    Base.metadata.create_all(bind=engine)
-    
-    db: Session = SessionLocal()
-    try:
-        # Check if already seeded
-        if db.query(Institution).first() is not None:
-            print("Database already seeded. Skipping...")
-            return
+async def seed_db():
+    print("[SEED] Starting database seeding...")
+    async with AsyncSessionLocal() as db:
+        # 1. Seed Institution (VERA Institute of Technology)
+        inst_stmt = select(Institution).filter(Institution.code == "VERA-TECH")
+        inst_res = await db.execute(inst_stmt)
+        inst = inst_res.scalar_one_or_none()
+        if not inst:
+            private_key, public_key = generate_ecdsa_keypair()
+            inst = Institution(
+                id=uuid.UUID("a1111111-1111-1111-1111-111111111111"),
+                name="VERA Institute of Technology",
+                code="VERA-TECH",
+                public_key=public_key,
+                is_verified=True,
+                created_at=datetime(2022, 1, 1)
+            )
+            db.add(inst)
+            await db.commit()
+            await db.refresh(inst)
+            print("[SEED] Seeded VERA Institute of Technology.")
+        else:
+            print("[SEED] VERA Institute of Technology already exists.")
+
+        # 2. Seed Student Alice Smith (Consistent student)
+        alice_stmt = select(Student).filter(Student.email == "alice.smith@example.com")
+        alice_res = await db.execute(alice_stmt)
+        alice = alice_res.scalar_one_or_none()
+        if not alice:
+            alice = Student(
+                id=uuid.UUID("b1111111-1111-1111-1111-111111111111"),
+                name="Alice Smith",
+                email="alice.smith@example.com",
+                matriculation_no="MAT-2022-001",
+                wallet_address="0x3333333333333333333333333333333333333333"
+            )
+            db.add(alice)
+            await db.commit()
+            await db.refresh(alice)
+            print("[SEED] Seeded student Alice Smith.")
             
-        print("Seeding database...")
-        
-        # 1. Institutions
-        inst1 = Institution(
-            institution_id="a1111111-1111-1111-1111-111111111111",
-            name="Amrita University",
-            wallet_address="0x1111111111111111111111111111111111111111",
-            status="VERIFIED"
-        )
-        inst2 = Institution(
-            institution_id="a2222222-2222-2222-2222-222222222222",
-            name="Unverified Academy",
-            wallet_address="0x2222222222222222222222222222222222222222",
-            status="PENDING"
-        )
-        db.add_all([inst1, inst2])
-        
-        # 2. Authorized Issuers (Item 2 in spec)
-        iss1 = AuthorizedIssuer(
-            issuer_id="e1111111-1111-1111-1111-111111111111",
-            institution_id=inst1.institution_id,
-            wallet_address="0x8888888888888888888888888888888888888888",
-            role="exam_officer",
-            is_active=True
-        )
-        iss2 = AuthorizedIssuer(
-            issuer_id="e2222222-2222-2222-2222-222222222222",
-            institution_id=inst1.institution_id,
-            wallet_address="0x9999999999999999999999999999999999999999",
-            role="registrar",
-            is_active=True
-        )
-        db.add_all([iss1, iss2])
-        
-        # 3. Students with Source-of-Truth Data (Item 3 in spec)
-        s1 = Student(
-            student_id="b1111111-1111-1111-1111-111111111111",
-            full_name="Alice Smith",
-            identity_ref="CS-2022-001",
-            wallet_address="0x3333333333333333333333333333333333333333",
-            dob="2004-05-14",
-            degree="B.Tech Computer Science",
-            department="CSE",
-            cgpa=9.43,
-            credits_completed=180,
-            graduation_status="graduated",
-            graduation_year=2026,
-            certificate_number="CERT-10001",
-            migration_status="none"
-        )
-        s2 = Student(
-            student_id="b2222222-2222-2222-2222-222222222222",
-            full_name="Bob Jones",
-            identity_ref="CS-2022-002",
-            wallet_address="0x4444444444444444444444444444444444444444",
-            dob="2004-11-22",
-            degree="B.Tech Computer Science",
-            department="CSE",
-            cgpa=8.78,
-            credits_completed=120,
-            graduation_status="enrolled",
-            migration_status="none"
-        )
-        s3 = Student(
-            student_id="b3333333-3333-3333-3333-333333333333",
-            full_name="Charlie Brown",
-            identity_ref="CS-2022-003",
-            wallet_address="0x5555555555555555555555555555555555555555",
-            dob="2004-02-18",
-            degree="B.Tech Computer Science",
-            department="CSE",
-            cgpa=7.52,
-            credits_completed=120,
-            graduation_status="enrolled",
-            migration_status="none"
-        )
-        s4 = Student(
-            student_id="b4444444-4444-4444-4444-444444444444",
-            full_name="David Green",
-            identity_ref="CS-2022-004",
-            wallet_address="0x6666666666666666666666666666666666666666",
-            dob="2004-08-30",
-            degree="B.Tech Computer Science",
-            department="CSE",
-            cgpa=8.15,
-            credits_completed=120,
-            graduation_status="enrolled",
-            migration_status="none"
-        )
-        s5 = Student(
-            student_id="b5555555-5555-5555-5555-555555555555",
-            full_name="Emily White",
-            identity_ref="CS-2022-005",
-            wallet_address="0x7777777777777777777777777777777777777777",
-            dob="2004-09-05",
-            degree="B.Tech Computer Science",
-            department="CSE",
-            cgpa=8.50,
-            credits_completed=180,
-            graduation_status="graduated",
-            graduation_year=2026,
-            certificate_number="CERT-10005",
-            migration_status="migrated"
-        )
-        db.add_all([s1, s2, s3, s4, s5])
-        
-        # 4. Emily White's Inconsistent Record (Migration pre-dates Admission)
-        # Event 1: Admission
-        adm_event = AcademicEvent(
-            event_id="c1111111-1111-1111-1111-111111111111",
-            student_id=s5.student_id,
-            institution_id=inst1.institution_id,
-            event_type="admission",
-            payload={"program": "B.Tech Computer Science", "admission_year": "2022"},
-            event_date=datetime(2022, 9, 1, tzinfo=timezone.utc),
-            finalized_at=datetime(2022, 9, 1, tzinfo=timezone.utc),
-            triggered_issuance=True
-        )
-        db.add(adm_event)
-        
-        # Event 2: Migration (deliberately dated BEFORE admission: 2021-06-01)
-        mig_event = AcademicEvent(
-            event_id="c2222222-2222-2222-2222-222222222222",
-            student_id=s5.student_id,
-            institution_id=inst1.institution_id,
-            event_type="migration",
-            payload={"migration_to": "Foreign University", "reason": "Transfer"},
-            event_date=datetime(2021, 6, 1, tzinfo=timezone.utc),
-            finalized_at=datetime(2021, 6, 1, tzinfo=timezone.utc),
-            triggered_issuance=True
-        )
-        db.add(mig_event)
-        
-        # Commit to save events
-        db.commit()
-        
-        # Generate credentials for Emily White
-        
-        # 4a. Admission Credential for Emily
-        adm_fields = {
-            "student_name": s5.full_name,
-            "roll_number": s5.identity_ref,
-            "program": "B.Tech Computer Science",
-            "admission_year": "2022"
-        }
-        adm_salts = {k: "salt_adm_" + k for k in adm_fields.keys()}
-        adm_merkle = MerkleTreeEngine(adm_fields, adm_salts)
-        
-        c_adm = Credential(
-            credential_id="d1111111-1111-1111-1111-111111111111",
-            student_id=s5.student_id,
-            institution_id=inst1.institution_id,
-            credential_type="transcript",
-            fields=adm_fields,
-            salts=adm_salts,
-            merkle_root=adm_merkle.get_root().hex(),
-            onchain_tx_hash="0xmocktxhash111111111111111111111111111111111111111111111111111",
-            issued_at=datetime(2022, 9, 1, tzinfo=timezone.utc),
-            status="active",
-            source_event_id=adm_event.event_id
-        )
-        db.add(c_adm)
-        
-        # 4b. Inconsistent Migration Credential for Emily
-        mig_fields = {
-            "student_name": s5.full_name,
-            "roll_number": s5.identity_ref,
-            "migration_to": "Foreign University",
-            "reason": "Transfer"
-        }
-        mig_salts = {k: "salt_mig_" + k for k in mig_fields.keys()}
-        mig_merkle = MerkleTreeEngine(mig_fields, mig_salts)
-        
-        c_mig = Credential(
-            credential_id="d2222222-2222-2222-2222-222222222222",
-            student_id=s5.student_id,
-            institution_id=inst1.institution_id,
-            credential_type="migration_certificate",
-            fields=mig_fields,
-            salts=mig_salts,
-            merkle_root=mig_merkle.get_root().hex(),
-            onchain_tx_hash="0xmocktxhash222222222222222222222222222222222222222222222222222",
-            issued_at=datetime(2021, 6, 1, tzinfo=timezone.utc),
-            status="active",
-            source_event_id=mig_event.event_id
-        )
-        db.add(c_mig)
-        
-        db.commit()
-        print("Database successfully seeded with academic source-of-truth records.")
-        
-    except Exception as e:
-        db.rollback()
-        print(f"Error during seeding: {e}")
-        raise e
-    finally:
-        db.close()
+            # Add Alice events
+            # Event 1: Enrollment
+            e1 = AcademicEvent(
+                id=uuid.UUID("c1111111-1111-1111-1111-222222222221"),
+                institution_id=inst.id,
+                student_id=alice.id,
+                event_type=EventType.ENROLLMENT.value,
+                payload={"matriculation_no": "MAT-2022-001", "program": "B.Tech CSE"},
+                trust_score=1.0,
+                status=EventStatus.VALID.value,
+                created_at=datetime(2022, 9, 1)
+            )
+            db.add(e1)
+            
+            # Event 2: Semester Final
+            e2 = AcademicEvent(
+                id=uuid.UUID("c1111111-1111-1111-1111-222222222222"),
+                institution_id=inst.id,
+                student_id=alice.id,
+                event_type=EventType.SEMESTER_FINAL.value,
+                payload={"matriculation_no": "MAT-2022-001", "semester": "Semester 1", "gpa": "9.43", "credits": "20"},
+                trust_score=1.0,
+                status=EventStatus.VALID.value,
+                created_at=datetime(2023, 1, 20)
+            )
+            db.add(e2)
+            
+            # Event 3: Degree Award
+            e3 = AcademicEvent(
+                id=uuid.UUID("c1111111-1111-1111-1111-222222222223"),
+                institution_id=inst.id,
+                student_id=alice.id,
+                event_type=EventType.DEGREE_AWARD.value,
+                payload={"matriculation_no": "MAT-2022-001", "degree": "B.Tech Computer Science", "cgpa": "9.43", "graduation_year": "2026"},
+                trust_score=1.0,
+                status=EventStatus.VALID.value,
+                created_at=datetime(2026, 6, 15)
+            )
+            db.add(e3)
+            await db.commit()
+            
+            # Generate credentials for Alice
+            for event in [e1, e2, e3]:
+                # Generate salts
+                salts = {k: secrets.token_hex(16) for k in event.payload.keys()}
+                leaf_hashes, merkle_root = build_merkle_tree(event.payload, salts)
+                
+                # Anchor
+                BlockchainLedgerSimulator.anchor_credential(
+                    credential_id=str(event.id),
+                    merkle_root=merkle_root,
+                    institution_id=str(inst.id)
+                )
+                
+                # Save Credential
+                c = Credential(
+                    id=event.id,
+                    event_id=event.id,
+                    student_id=alice.id,
+                    merkle_root=merkle_root,
+                    canonical_payload_hash=hashlib.sha256(canonicalize_json(event.payload)).hexdigest(),
+                    salts=salts,
+                    status=CredentialStatus.ACTIVE.value,
+                    version=1,
+                    created_at=datetime.utcnow()
+                )
+                db.add(c)
+            await db.commit()
+            print("[SEED] Seeded Alice Smith credentials.")
+        else:
+            print("[SEED] Student Alice Smith already exists.")
+
+        # 3. Seed Student Emily White (Inconsistent student)
+        emily_stmt = select(Student).filter(Student.email == "emily.white@example.com")
+        emily_res = await db.execute(emily_stmt)
+        emily = emily_res.scalar_one_or_none()
+        if not emily:
+            emily = Student(
+                id=uuid.UUID("b5555555-5555-5555-5555-555555555555"),
+                name="Emily White",
+                email="emily.white@example.com",
+                matriculation_no="MAT-2022-005",
+                wallet_address="0x7777777777777777777777777777777777777777"
+            )
+            db.add(emily)
+            await db.commit()
+            await db.refresh(emily)
+            print("[SEED] Seeded student Emily White.")
+            
+            # Event 1: Enrollment
+            e_emily_1 = AcademicEvent(
+                id=uuid.UUID("c1111111-1111-1111-1111-111111111111"),
+                institution_id=inst.id,
+                student_id=emily.id,
+                event_type=EventType.ENROLLMENT.value,
+                payload={"matriculation_no": "MAT-2022-005", "program": "B.Tech CSE"},
+                trust_score=1.0,
+                status=EventStatus.VALID.value,
+                created_at=datetime(2022, 9, 1)
+            )
+            db.add(e_emily_1)
+            
+            # Event 2: Migration request (Inconsistent: dated 2021-06-01)
+            e_emily_2 = AcademicEvent(
+                id=uuid.UUID("c3333333-3333-3333-3333-333333333333"),
+                institution_id=inst.id,
+                student_id=emily.id,
+                event_type=EventType.MIGRATION_REQ.value,
+                payload={"matriculation_no": "MAT-2022-005", "destination": "Foreign Tech", "reason": "Transfer"},
+                trust_score=0.5,
+                status=EventStatus.SUSPICIOUS_REVIEW.value,
+                created_at=datetime(2021, 6, 1)
+            )
+            db.add(e_emily_2)
+            await db.commit()
+            
+            # Generate credentials for Emily White's Valid events only
+            salts = {k: secrets.token_hex(16) for k in e_emily_1.payload.keys()}
+            leaf_hashes, merkle_root = build_merkle_tree(e_emily_1.payload, salts)
+            BlockchainLedgerSimulator.anchor_credential(
+                credential_id=str(e_emily_1.id),
+                merkle_root=merkle_root,
+                institution_id=str(inst.id)
+            )
+            c_emily_1 = Credential(
+                id=e_emily_1.id,
+                event_id=e_emily_1.id,
+                student_id=emily.id,
+                merkle_root=merkle_root,
+                canonical_payload_hash=hashlib.sha256(canonicalize_json(e_emily_1.payload)).hexdigest(),
+                salts=salts,
+                status=CredentialStatus.ACTIVE.value,
+                version=1,
+                created_at=datetime.utcnow()
+            )
+            db.add(c_emily_1)
+            await db.commit()
+            print("[SEED] Seeded Emily White credentials.")
+        else:
+            print("[SEED] Student Emily White already exists.")
+
+    print("[SEED] Database seeding complete.")
 
 if __name__ == "__main__":
-    seed_db()
+    asyncio.run(seed_db())
