@@ -85,6 +85,16 @@ export const api = {
   // Students
   getStudents: () => request<Student[]>('/students'),
   getStudent: (id: string) => request<Student>(`/students/${id}`),
+  createInstitutionStudent: (instId: string, data: { full_name: string; email: string; registration_number: string; department_id?: string; program_id?: string; admission_year?: number; expected_graduation_year?: number; current_semester?: number; academic_status?: string }) => request<Student>(`/institutions/${instId}/students`, { method: 'POST', body: JSON.stringify(data) }),
+  createDepartment: (instId: string, data: { name: string; code: string }) => request<any>(`/institutions/${instId}/departments`, { method: 'POST', body: JSON.stringify(data) }),
+  getDepartments: (instId: string) => request<any[]>(`/institutions/${instId}/departments`),
+  createProgram: (instId: string, data: { name: string; code: string; degree_type: string; department_id?: string; duration_years?: number; total_semesters?: number }) => request<any>(`/institutions/${instId}/programs`, { method: 'POST', body: JSON.stringify(data) }),
+  getPrograms: (instId: string) => request<any[]>(`/institutions/${instId}/programs`),
+  createCourse: (instId: string, data: { course_code: string; course_name: string; credits: number; department_id?: string; program_id?: string; semester_number?: number }) => request<any>(`/institutions/${instId}/courses`, { method: 'POST', body: JSON.stringify(data) }),
+  getCourses: (instId: string) => request<any[]>(`/institutions/${instId}/courses`),
+  analyzeAcademicImport: (instId: string, data: { import_type?: string; file_name?: string; rows: Array<{ registration_number: string; academic_year: string; semester_number: number; semester_name: string; course_code: string; course_name: string; credits: number; grade: string; marks?: number }> }) => request<any>(`/institutions/${instId}/imports/analyze`, { method: 'POST', body: JSON.stringify(data) }),
+  getReviewCases: (instId: string) => request<any[]>(`/institutions/${instId}/review-cases`),
+  updateReviewCase: (instId: string, caseId: string, status: 'APPROVED' | 'REJECTED' | 'CORRECTION_REQUESTED') => request<any>(`/institutions/${instId}/review-cases/${caseId}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
   createStudent: (data: { name: string; email: string; matriculation_no: string; wallet_address?: string }) =>
     request<Student>('/students', {
       method: 'POST',
@@ -96,6 +106,13 @@ export const api = {
     ),
   getStudentSummary: (studentId: string) => request<{ summary: string; grounded_in: string }>(`/ai/student-summary/${studentId}`),
   getStudentEvents: (studentId: string) => request<any[]>(`/students/${studentId}/events`),
+  createEnrollment: (studentId: string, data: { program_id: string; admission_date: string; admission_year: number }) => request<any>(`/students/${studentId}/enrollment`, { method: 'POST', body: JSON.stringify(data) }),
+  createSemesterRecord: (studentId: string, data: { institution_id: string; academic_year: string; semester_number: number; semester_name: string; course_results: Array<{ course_id?: string; course_code: string; course_name: string; credits: number; grade: string; marks?: number }> }) => request<any>(`/students/${studentId}/semester-records`, { method: 'POST', body: JSON.stringify(data) }),
+  getSemesterRecords: (studentId: string) => request<any[]>(`/students/${studentId}/semester-records`),
+  getAcademicProfile: (studentId: string) => request<any>(`/students/${studentId}/academic-profile`),
+  createDegreeRecord: (studentId: string, data: { institution_id: string; degree_name: string; graduation_year: number; program_id?: string; graduation_date?: string; final_cgpa?: number; classification?: string }) => request<any>(`/students/${studentId}/degree-records`, { method: 'POST', body: JSON.stringify(data) }),
+  createMigrationRecord: (studentId: string, data: { institution_id: string; destination_institution: string; reason: string; last_completed_semester?: number; application_date: string }) => request<any>(`/students/${studentId}/migration-records`, { method: 'POST', body: JSON.stringify(data) }),
+  createAchievement: (studentId: string, data: { title: string; category: string; issuer: string; issue_date: string; certificate_number?: string; description?: string }) => request<any>(`/students/${studentId}/achievements`, { method: 'POST', body: JSON.stringify(data) }),
   getStudentAccessHistory: (studentId: string) => request<{ access_logs: AccessLog[] }>(`/students/${studentId}/access-history`),
   getStudentPermissions: (studentId: string) => request<Permission[]>(`/students/${studentId}/permissions`),
 

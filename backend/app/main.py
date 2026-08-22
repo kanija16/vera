@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.database import engine, get_db, AsyncSessionLocal, bootstrap_database
-from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch, DocumentRequest, VerificationRequest, IntegrityRequest, Notification
-from app.schemas import EventCreate, EventResponse, FinalizeResponse, CohortFinalizeRequest, CohortFinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse, StudentInfoSchema, DocumentRequestCreate, DocumentRequestResponse, DocumentRequestIssueRequest, VerificationRequestCreate, VerificationRequestResponse, IntegrityRequestCreate, IntegrityRequestResponse, NotificationResponse
+from app.models import Base, Institution, Department, Program, Course, Enrollment, SemesterRecord, CourseResult, DegreeRecord, MigrationRecord, AchievementRecord, ImportJob, ImportRow, ReviewCase, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch, DocumentRequest, VerificationRequest, IntegrityRequest, Notification
+from app.schemas import EventCreate, EventResponse, FinalizeResponse, CohortFinalizeRequest, CohortFinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse, StudentInfoSchema, DocumentRequestCreate, DocumentRequestResponse, DocumentRequestIssueRequest, VerificationRequestCreate, VerificationRequestResponse, IntegrityRequestCreate, IntegrityRequestResponse, NotificationResponse, DepartmentCreate, ProgramCreate, CourseCreate, InstitutionStudentCreate, EnrollmentCreate, SemesterRecordCreate, SemesterRecordResponse, DegreeRecordCreate, MigrationRecordCreate, AchievementCreate, AcademicImportRequest, ReviewCaseStatusUpdate
 from app.services.crypto import build_merkle_tree, generate_hmac_token, verify_hmac_token, verify_merkle_proof, canonicalize_json, generate_merkle_proof, sign_message_ecdsa, verify_signature_ecdsa
 from app.services.validator import ConsistencyAnomalyEngine
 from app.services.explainer import explain_consistency_errors, generate_student_summary
@@ -108,6 +108,129 @@ async def list_institutions(db: AsyncSession = Depends(get_db)):
     return [{"id": i.id, "name": i.name, "code": i.code, "status": i.status, "is_verified": i.is_verified} for i in institutions]
 
 
+@app.post("/api/v1/institutions/{inst_id}/departments", status_code=201)
+async def create_department(inst_id: uuid.UUID, payload: DepartmentCreate, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Institution, inst_id):
+        raise HTTPException(status_code=404, detail="Institution not found")
+    department = Department(institution_id=inst_id, name=payload.name, code=payload.code)
+    db.add(department)
+    await db.commit()
+    await db.refresh(department)
+    return department
+
+
+@app.get("/api/v1/institutions/{inst_id}/departments")
+async def list_departments(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Department).filter(Department.institution_id == inst_id).order_by(Department.name.asc()))
+    return list(result.scalars().all())
+
+
+@app.post("/api/v1/institutions/{inst_id}/programs", status_code=201)
+async def create_program(inst_id: uuid.UUID, payload: ProgramCreate, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Institution, inst_id):
+        raise HTTPException(status_code=404, detail="Institution not found")
+    if payload.department_id and not await db.get(Department, payload.department_id):
+        raise HTTPException(status_code=404, detail="Department not found")
+    program = Program(institution_id=inst_id, **payload.model_dump())
+    db.add(program)
+    await db.commit()
+    await db.refresh(program)
+    return program
+
+
+@app.get("/api/v1/institutions/{inst_id}/programs")
+async def list_programs(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Program).filter(Program.institution_id == inst_id).order_by(Program.name.asc()))
+    return list(result.scalars().all())
+
+
+@app.post("/api/v1/institutions/{inst_id}/courses", status_code=201)
+async def create_course(inst_id: uuid.UUID, payload: CourseCreate, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Institution, inst_id):
+        raise HTTPException(status_code=404, detail="Institution not found")
+    course = Course(institution_id=inst_id, **payload.model_dump())
+    db.add(course)
+    await db.commit()
+    await db.refresh(course)
+    return course
+
+
+@app.get("/api/v1/institutions/{inst_id}/courses")
+async def list_courses(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Course).filter(Course.institution_id == inst_id).order_by(Course.course_code.asc()))
+    return list(result.scalars().all())
+
+
+@app.get("/api/v1/institutions/{inst_id}/review-cases")
+async def list_review_cases(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(ReviewCase).filter(ReviewCase.institution_id == inst_id).order_by(ReviewCase.created_at.desc()))
+    return list(result.scalars().all())
+
+
+@app.post("/api/v1/institutions/{inst_id}/review-cases/{case_id}/status")
+async def update_review_case(inst_id: uuid.UUID, case_id: uuid.UUID, payload: ReviewCaseStatusUpdate, db: AsyncSession = Depends(get_db)):
+    review_case = await db.get(ReviewCase, case_id)
+    if not review_case or review_case.institution_id != inst_id:
+        raise HTTPException(status_code=404, detail="Review case not found")
+    review_case.status = payload.status
+    await db.commit()
+    await db.refresh(review_case)
+    return review_case
+
+
+@app.post("/api/v1/institutions/{inst_id}/imports/analyze", status_code=201)
+async def analyze_academic_import(inst_id: uuid.UUID, payload: AcademicImportRequest, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Institution, inst_id):
+        raise HTTPException(status_code=404, detail="Institution not found")
+    grade_points = {"A+": 10.0, "A": 9.0, "B+": 8.0, "B": 7.0, "C": 6.0, "D": 5.0, "F": 0.0}
+    import_job = ImportJob(institution_id=inst_id, import_type=payload.import_type, file_name=payload.file_name, total_rows=len(payload.rows))
+    db.add(import_job)
+    await db.flush()
+    for row_number, row in enumerate(payload.rows, start=1):
+        issues = []
+        if row.grade.upper() not in grade_points:
+            issues.append("Unsupported grade")
+        student_result = await db.execute(select(Student).filter(Student.matriculation_no == row.registration_number))
+        if not student_result.scalar_one_or_none():
+            issues.append("Student not found")
+        row_status = "INVALID" if any(issue == "Unsupported grade" for issue in issues) else "NEEDS_REVIEW" if issues else "READY"
+        if row_status == "READY": import_job.valid_rows += 1
+        elif row_status == "NEEDS_REVIEW": import_job.review_rows += 1
+        else: import_job.invalid_rows += 1
+        db.add(ImportRow(import_job_id=import_job.id, row_number=row_number, raw_data=row.model_dump(), normalized_data=row.model_dump(), status=row_status, issues=issues))
+    import_job.status = "ANALYZED"
+    await db.commit()
+    await db.refresh(import_job)
+    return {"id": import_job.id, "status": import_job.status, "total_rows": import_job.total_rows, "valid_rows": import_job.valid_rows, "review_rows": import_job.review_rows, "invalid_rows": import_job.invalid_rows}
+
+
+@app.post("/api/v1/institutions/{inst_id}/students", status_code=201)
+async def create_institution_student(inst_id: uuid.UUID, payload: InstitutionStudentCreate, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Institution, inst_id):
+        raise HTTPException(status_code=404, detail="Institution not found")
+    duplicate = await db.execute(select(Student).filter((Student.email == payload.email) | (Student.matriculation_no == payload.registration_number)))
+    if duplicate.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="A student with this email or registration number already exists")
+    student = Student(
+        institution_id=inst_id,
+        name=payload.full_name,
+        full_name=payload.full_name,
+        email=payload.email,
+        matriculation_no=payload.registration_number,
+        registration_number=payload.registration_number,
+        department_id=payload.department_id,
+        program_id=payload.program_id,
+        admission_year=payload.admission_year,
+        expected_graduation_year=payload.expected_graduation_year,
+        current_semester=payload.current_semester,
+        academic_status=payload.academic_status,
+    )
+    db.add(student)
+    await db.commit()
+    await db.refresh(student)
+    return student
+
+
 # 1c. POST /api/v1/institutions/{inst_id}/status -> Update institution status (ACCREDITED/SUSPENDED/etc.)
 @app.post("/api/v1/institutions/{inst_id}/status")
 async def update_institution_status(inst_id: uuid.UUID, payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
@@ -172,7 +295,137 @@ async def get_student(student_id: uuid.UUID, db: AsyncSession = Depends(get_db))
     student = res.scalar_one_or_none()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
-    return {"id": student.id, "name": student.name, "email": student.email, "matriculation_no": student.matriculation_no, "wallet_address": student.wallet_address}
+    return {"id": student.id, "name": student.name, "email": student.email, "matriculation_no": student.matriculation_no, "wallet_address": student.wallet_address, "institution_id": student.institution_id, "full_name": student.full_name or student.name, "registration_number": student.registration_number or student.matriculation_no, "department_id": student.department_id, "program_id": student.program_id, "admission_year": student.admission_year, "expected_graduation_year": student.expected_graduation_year, "current_semester": student.current_semester, "academic_status": student.academic_status}
+
+
+@app.post("/api/v1/students/{student_id}/enrollment", status_code=201)
+async def create_enrollment(student_id: uuid.UUID, payload: EnrollmentCreate, db: AsyncSession = Depends(get_db)):
+    student = await db.get(Student, student_id)
+    program = await db.get(Program, payload.program_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if not program or (student.institution_id and program.institution_id != student.institution_id):
+        raise HTTPException(status_code=404, detail="Program not found for this student")
+    enrollment = Enrollment(student_id=student_id, institution_id=program.institution_id, **payload.model_dump())
+    student.institution_id = program.institution_id
+    student.program_id = program.id
+    student.admission_year = payload.admission_year
+    db.add(enrollment)
+    await db.commit()
+    await db.refresh(enrollment)
+    return enrollment
+
+
+@app.post("/api/v1/students/{student_id}/semester-records", response_model=SemesterRecordResponse, status_code=201)
+async def create_semester_record(student_id: uuid.UUID, payload: SemesterRecordCreate, db: AsyncSession = Depends(get_db)):
+    student = await db.get(Student, student_id)
+    institution = await db.get(Institution, payload.institution_id)
+    if not student or not institution:
+        raise HTTPException(status_code=404, detail="Student or institution not found")
+    if student.institution_id and student.institution_id != payload.institution_id:
+        raise HTTPException(status_code=409, detail="Student is not enrolled at this institution")
+
+    grade_points = {"A+": 10.0, "A": 9.0, "B+": 8.0, "B": 7.0, "C": 6.0, "D": 5.0, "F": 0.0}
+    if any(result.grade.upper() not in grade_points for result in payload.course_results):
+        raise HTTPException(status_code=422, detail="Each course result must use a supported grade: A+, A, B+, B, C, D, or F")
+    total_credits = sum(result.credits for result in payload.course_results)
+    gpa = round(sum(result.credits * grade_points[result.grade.upper()] for result in payload.course_results) / total_credits, 2)
+    prior_records = await db.execute(select(SemesterRecord).filter(SemesterRecord.student_id == student_id))
+    prior = list(prior_records.scalars().all())
+    prior_points = sum(record.gpa * record.total_credits for record in prior)
+    prior_credits = sum(record.total_credits for record in prior)
+    cgpa = round((prior_points + gpa * total_credits) / (prior_credits + total_credits), 2)
+
+    record = SemesterRecord(
+        student_id=student_id,
+        institution_id=payload.institution_id,
+        academic_year=payload.academic_year,
+        semester_number=payload.semester_number,
+        semester_name=payload.semester_name,
+        total_credits=total_credits,
+        gpa=gpa,
+        cgpa=cgpa,
+        status="PENDING",
+    )
+    db.add(record)
+    await db.flush()
+    for result in payload.course_results:
+        db.add(CourseResult(semester_record_id=record.id, grade_points=grade_points[result.grade.upper()], **result.model_dump()))
+    event_payload = {
+        "matriculation_no": student.matriculation_no,
+        "academic_year": payload.academic_year,
+        "semester": payload.semester_name,
+        "semester_number": payload.semester_number,
+        "total_credits": total_credits,
+        "gpa": gpa,
+        "cgpa": cgpa,
+        "course_results": [{**result.model_dump(exclude={"course_id"}), "course_id": str(result.course_id) if result.course_id else None} for result in payload.course_results],
+    }
+    event_status, trust_score, errors = await ConsistencyAnomalyEngine(db).evaluate_event(
+        institution_id=str(payload.institution_id), student_id=str(student_id), event_type=EventType.SEMESTER_FINAL.value,
+        payload=event_payload, event_date=datetime.utcnow(),
+    )
+    db.add(AcademicEvent(institution_id=payload.institution_id, student_id=student_id, event_type=EventType.SEMESTER_FINAL.value, payload=event_payload, trust_score=trust_score, status=event_status, created_at=datetime.utcnow()))
+    if event_status == EventStatus.SUSPICIOUS_REVIEW.value:
+        record.status = "NEEDS_REVIEW"
+    await db.commit()
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(select(SemesterRecord).filter(SemesterRecord.id == record.id).options(selectinload(SemesterRecord.course_results)))
+    return result.scalar_one()
+
+
+@app.get("/api/v1/students/{student_id}/semester-records", response_model=List[SemesterRecordResponse])
+async def list_semester_records(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(SemesterRecord).filter(SemesterRecord.student_id == student_id).options(selectinload(SemesterRecord.course_results)).order_by(SemesterRecord.semester_number.asc()))
+    return list(result.scalars().all())
+
+
+@app.post("/api/v1/students/{student_id}/degree-records", status_code=201)
+async def create_degree_record(student_id: uuid.UUID, payload: DegreeRecordCreate, db: AsyncSession = Depends(get_db)):
+    student = await db.get(Student, student_id)
+    if not student or not await db.get(Institution, payload.institution_id):
+        raise HTTPException(status_code=404, detail="Student or institution not found")
+    record = DegreeRecord(student_id=student_id, **payload.model_dump())
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+@app.post("/api/v1/students/{student_id}/migration-records", status_code=201)
+async def create_migration_record(student_id: uuid.UUID, payload: MigrationRecordCreate, db: AsyncSession = Depends(get_db)):
+    student = await db.get(Student, student_id)
+    if not student or not await db.get(Institution, payload.institution_id):
+        raise HTTPException(status_code=404, detail="Student or institution not found")
+    record = MigrationRecord(student_id=student_id, **payload.model_dump())
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+@app.post("/api/v1/students/{student_id}/achievements", status_code=201)
+async def create_achievement(student_id: uuid.UUID, payload: AchievementCreate, db: AsyncSession = Depends(get_db)):
+    if not await db.get(Student, student_id):
+        raise HTTPException(status_code=404, detail="Student not found")
+    record = AchievementRecord(student_id=student_id, **payload.model_dump())
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return record
+
+
+@app.get("/api/v1/students/{student_id}/academic-profile")
+async def get_academic_profile(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    student = await db.get(Student, student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    from sqlalchemy.orm import selectinload
+    semester_result = await db.execute(select(SemesterRecord).filter(SemesterRecord.student_id == student_id).options(selectinload(SemesterRecord.course_results)).order_by(SemesterRecord.semester_number.asc()))
+    degree_result = await db.execute(select(DegreeRecord).filter(DegreeRecord.student_id == student_id).order_by(DegreeRecord.graduation_year.desc()))
+    migration_result = await db.execute(select(MigrationRecord).filter(MigrationRecord.student_id == student_id).order_by(MigrationRecord.application_date.desc()))
+    achievement_result = await db.execute(select(AchievementRecord).filter(AchievementRecord.student_id == student_id).order_by(AchievementRecord.issue_date.desc()))
+    return {"student": student, "semester_records": list(semester_result.scalars().all()), "degree_records": list(degree_result.scalars().all()), "migration_records": list(migration_result.scalars().all()), "achievements": list(achievement_result.scalars().all())}
 
 
 # 3. POST /api/v1/institutions/{inst_id}/events -> Ingest event
@@ -606,7 +859,16 @@ async def list_student_credentials(student_id: uuid.UUID, db: AsyncSession = Dep
         name=student.name,
         email=student.email,
         matriculation_no=student.matriculation_no,
-        wallet_address=student.wallet_address
+        wallet_address=student.wallet_address,
+        institution_id=student.institution_id,
+        full_name=student.full_name or student.name,
+        registration_number=student.registration_number or student.matriculation_no,
+        department_id=student.department_id,
+        program_id=student.program_id,
+        admission_year=student.admission_year,
+        expected_graduation_year=student.expected_graduation_year,
+        current_semester=student.current_semester,
+        academic_status=student.academic_status,
     )
     
     response_items = []

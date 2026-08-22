@@ -12,6 +12,40 @@ export interface Student {
   email: string;
   matriculation_no: string;
   wallet_address?: string;
+  institution_id?: string;
+  full_name?: string;
+  registration_number?: string;
+  department_id?: string;
+  program_id?: string;
+  admission_year?: number;
+  expected_graduation_year?: number;
+  current_semester?: number;
+  academic_status?: string;
+}
+
+export interface CourseResult {
+  id: string;
+  course_id?: string | null;
+  course_code: string;
+  course_name: string;
+  credits: number;
+  grade: string;
+  grade_points: number;
+  marks?: number | null;
+}
+
+export interface SemesterRecord {
+  id: string;
+  student_id: string;
+  institution_id: string;
+  academic_year: string;
+  semester_number: number;
+  semester_name: string;
+  total_credits: number;
+  gpa: number;
+  cgpa: number;
+  status: string;
+  course_results: CourseResult[];
 }
 
 export interface AcademicEvent {

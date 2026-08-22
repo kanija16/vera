@@ -78,6 +78,9 @@ class Institution(Base):
     events = relationship("AcademicEvent", back_populates="institution", cascade="all, delete-orphan")
     officers = relationship("InstitutionOfficer", back_populates="institution", cascade="all, delete-orphan")
     batches = relationship("AnchorBatch", back_populates="institution", cascade="all, delete-orphan")
+    departments = relationship("Department", back_populates="institution", cascade="all, delete-orphan")
+    programs = relationship("Program", back_populates="institution", cascade="all, delete-orphan")
+    courses = relationship("Course", back_populates="institution", cascade="all, delete-orphan")
 
 
 class InstitutionOfficer(Base):
@@ -102,11 +105,226 @@ class Student(Base):
     email = Column(String, nullable=False, unique=True)
     matriculation_no = Column(String, nullable=False, unique=True)
     wallet_address = Column(String, nullable=True, unique=True)
+    institution_id = Column(GUID, ForeignKey('institution.id'), nullable=True)
+    full_name = Column(String, nullable=True)
+    registration_number = Column(String, nullable=True)
+    department_id = Column(GUID, ForeignKey('department.id'), nullable=True)
+    program_id = Column(GUID, ForeignKey('program.id'), nullable=True)
+    admission_year = Column(Integer, nullable=True)
+    expected_graduation_year = Column(Integer, nullable=True)
+    current_semester = Column(Integer, nullable=True)
+    academic_status = Column(String, nullable=True, default="ACTIVE")
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     
     events = relationship("AcademicEvent", back_populates="student", cascade="all, delete-orphan")
     credentials = relationship("Credential", back_populates="student", cascade="all, delete-orphan")
     permissions = relationship("Permission", back_populates="student", cascade="all, delete-orphan")
+    institution = relationship("Institution")
+    department = relationship("Department", back_populates="students")
+    program = relationship("Program", back_populates="students")
+    enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")
+    semester_records = relationship("SemesterRecord", back_populates="student", cascade="all, delete-orphan")
+    degree_records = relationship("DegreeRecord", back_populates="student", cascade="all, delete-orphan")
+    migration_records = relationship("MigrationRecord", back_populates="student", cascade="all, delete-orphan")
+    achievements = relationship("AchievementRecord", back_populates="student", cascade="all, delete-orphan")
+
+
+class Department(Base):
+    __tablename__ = "department"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    name = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    institution = relationship("Institution", back_populates="departments")
+    students = relationship("Student", back_populates="department")
+    programs = relationship("Program", back_populates="department", cascade="all, delete-orphan")
+    courses = relationship("Course", back_populates="department", cascade="all, delete-orphan")
+
+
+class Program(Base):
+    __tablename__ = "program"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    department_id = Column(GUID, ForeignKey("department.id"), nullable=True)
+    name = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    degree_type = Column(String, nullable=False)
+    duration_years = Column(Integer, nullable=True)
+    total_semesters = Column(Integer, nullable=True)
+    institution = relationship("Institution", back_populates="programs")
+    department = relationship("Department", back_populates="programs")
+    students = relationship("Student", back_populates="program")
+    courses = relationship("Course", back_populates="program", cascade="all, delete-orphan")
+
+
+class Course(Base):
+    __tablename__ = "course"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    department_id = Column(GUID, ForeignKey("department.id"), nullable=True)
+    program_id = Column(GUID, ForeignKey("program.id"), nullable=True)
+    course_code = Column(String, nullable=False)
+    course_name = Column(String, nullable=False)
+    credits = Column(Float, nullable=False)
+    semester_number = Column(Integer, nullable=True)
+    institution = relationship("Institution", back_populates="courses")
+    department = relationship("Department", back_populates="courses")
+    program = relationship("Program", back_populates="courses")
+
+
+class Enrollment(Base):
+    __tablename__ = "enrollment"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    program_id = Column(GUID, ForeignKey("program.id"), nullable=False)
+    admission_date = Column(DateTime, nullable=False)
+    admission_year = Column(Integer, nullable=False)
+    status = Column(String, nullable=False, default="ACTIVE")
+    student = relationship("Student", back_populates="enrollments")
+
+
+class SemesterRecord(Base):
+    __tablename__ = "semester_record"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    academic_year = Column(String, nullable=False)
+    semester_number = Column(Integer, nullable=False)
+    semester_name = Column(String, nullable=False)
+    total_credits = Column(Float, nullable=False, default=0)
+    gpa = Column(Float, nullable=False, default=0)
+    cgpa = Column(Float, nullable=False, default=0)
+    status = Column(String, nullable=False, default="PENDING")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    student = relationship("Student", back_populates="semester_records")
+    course_results = relationship("CourseResult", back_populates="semester_record", cascade="all, delete-orphan")
+
+
+class CourseResult(Base):
+    __tablename__ = "course_result"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    semester_record_id = Column(GUID, ForeignKey("semester_record.id"), nullable=False)
+    course_id = Column(GUID, ForeignKey("course.id"), nullable=True)
+    course_code = Column(String, nullable=False)
+    course_name = Column(String, nullable=False)
+    credits = Column(Float, nullable=False)
+    grade = Column(String, nullable=False)
+    grade_points = Column(Float, nullable=False)
+    marks = Column(Float, nullable=True)
+    semester_record = relationship("SemesterRecord", back_populates="course_results")
+
+
+class DegreeRecord(Base):
+    __tablename__ = "degree_record"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    program_id = Column(GUID, ForeignKey("program.id"), nullable=True)
+    degree_name = Column(String, nullable=False)
+    graduation_year = Column(Integer, nullable=False)
+    graduation_date = Column(DateTime, nullable=True)
+    final_cgpa = Column(Float, nullable=True)
+    classification = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="PENDING")
+    student = relationship("Student", back_populates="degree_records")
+
+
+class MigrationRecord(Base):
+    __tablename__ = "migration_record"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    destination_institution = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    last_completed_semester = Column(Integer, nullable=True)
+    application_date = Column(DateTime, nullable=False)
+    status = Column(String, nullable=False, default="PENDING")
+    student = relationship("Student", back_populates="migration_records")
+
+
+class AchievementRecord(Base):
+    __tablename__ = "achievement_record"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    title = Column(String, nullable=False)
+    category = Column(String, nullable=False)
+    issuer = Column(String, nullable=False)
+    issue_date = Column(DateTime, nullable=False)
+    certificate_number = Column(String, nullable=True)
+    description = Column(String, nullable=True)
+    student = relationship("Student", back_populates="achievements")
+
+
+class SupportingDocument(Base):
+    __tablename__ = "supporting_document"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=False)
+    record_type = Column(String, nullable=False)
+    record_id = Column(GUID, nullable=False)
+    file_name = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
+    mime_type = Column(String, nullable=False)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+    ocr_status = Column(String, nullable=False, default="NOT_PROCESSED")
+    extracted_data = Column(SafeJSONB, nullable=True)
+    verification_status = Column(String, nullable=False, default="PENDING")
+
+
+class ImportJob(Base):
+    __tablename__ = "import_job"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    import_type = Column(String, nullable=False)
+    file_name = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="UPLOADED")
+    total_rows = Column(Integer, default=0)
+    valid_rows = Column(Integer, default=0)
+    review_rows = Column(Integer, default=0)
+    invalid_rows = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    rows = relationship("ImportRow", back_populates="import_job", cascade="all, delete-orphan")
+
+
+class ImportRow(Base):
+    __tablename__ = "import_row"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    import_job_id = Column(GUID, ForeignKey("import_job.id"), nullable=False)
+    row_number = Column(Integer, nullable=False)
+    raw_data = Column(SafeJSONB, nullable=False)
+    normalized_data = Column(SafeJSONB, nullable=True)
+    status = Column(String, nullable=False, default="PENDING")
+    issues = Column(SafeJSONB, nullable=True)
+    import_job = relationship("ImportJob", back_populates="rows")
+
+
+class ReviewCase(Base):
+    __tablename__ = "review_case"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=False)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=True)
+    record_type = Column(String, nullable=False)
+    record_id = Column(GUID, nullable=True)
+    issue_type = Column(String, nullable=False)
+    severity = Column(String, nullable=False, default="MEDIUM")
+    explanation = Column(String, nullable=False)
+    original_data = Column(SafeJSONB, nullable=True)
+    corrected_data = Column(SafeJSONB, nullable=True)
+    status = Column(String, nullable=False, default="OPEN")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AIAnalysis(Base):
+    __tablename__ = "ai_analysis"
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    institution_id = Column(GUID, ForeignKey("institution.id"), nullable=True)
+    student_id = Column(GUID, ForeignKey("student.id"), nullable=True)
+    record_type = Column(String, nullable=False)
+    record_id = Column(GUID, nullable=True)
+    analysis_type = Column(String, nullable=False)
+    findings = Column(SafeJSONB, nullable=False)
+    provider = Column(String, nullable=False, default="deterministic")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class AcademicEvent(Base):

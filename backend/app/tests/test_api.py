@@ -219,3 +219,46 @@ def test_document_request_can_be_issued_into_wallet():
 
         requests = client.get(f"/api/v1/students/{student_id}/document-requests").json()
         assert next(item for item in requests if item["id"] == request_id)["status"] == "ISSUED"
+
+
+def test_structured_semester_record_generates_normalized_event():
+    with TestClient(app) as client:
+        institution_id = "a1111111-1111-1111-1111-111111111111"
+        student_id = "b1111111-1111-1111-1111-111111111111"
+        department = client.post(f"/api/v1/institutions/{institution_id}/departments", json={"name": "Computer Science", "code": "CSE"})
+        assert department.status_code == 201
+        program = client.post(f"/api/v1/institutions/{institution_id}/programs", json={"name": "B.Tech Computer Science", "code": "BT-CSE", "degree_type": "BTECH", "department_id": department.json()["id"]})
+        assert program.status_code == 201
+        response = client.post(f"/api/v1/students/{student_id}/semester-records", json={
+            "institution_id": institution_id,
+            "academic_year": "2025-2026",
+            "semester_number": 4,
+            "semester_name": "Semester 4",
+            "course_results": [
+                {"course_code": "CS401", "course_name": "Distributed Systems", "credits": 4, "grade": "A", "marks": 88},
+                {"course_code": "CS402", "course_name": "Compiler Design", "credits": 3, "grade": "B+", "marks": 78},
+            ],
+        })
+        assert response.status_code == 201
+        data = response.json()
+        assert data["gpa"] == 8.57
+        assert data["total_credits"] == 7
+        assert len(data["course_results"]) == 2
+        events = client.get(f"/api/v1/institutions/{institution_id}/events").json()
+        structured_event = next(event for event in events if event["event_type"] == "SEMESTER_FINAL" and event["payload"].get("semester_number") == 4)
+        assert structured_event["payload"]["course_results"][0]["course_code"] == "CS401"
+
+
+def test_import_analysis_classifies_invalid_and_ready_rows():
+    with TestClient(app) as client:
+        institution_id = "a1111111-1111-1111-1111-111111111111"
+        response = client.post(f"/api/v1/institutions/{institution_id}/imports/analyze", json={
+            "file_name": "semester-results.csv",
+            "rows": [
+                {"registration_number": "MAT-2022-001", "academic_year": "2025-2026", "semester_number": 4, "semester_name": "Semester 4", "course_code": "CS401", "course_name": "Distributed Systems", "credits": 4, "grade": "A"},
+                {"registration_number": "MAT-UNKNOWN", "academic_year": "2025-2026", "semester_number": 4, "semester_name": "Semester 4", "course_code": "CS402", "course_name": "Compilers", "credits": 3, "grade": "Z"},
+            ],
+        })
+        assert response.status_code == 201
+        assert response.json()["valid_rows"] == 1
+        assert response.json()["invalid_rows"] == 1

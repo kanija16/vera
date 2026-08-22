@@ -20,8 +20,13 @@ export default function InstitutionIssuancePage() {
 
   // Event ingestion form
   const [studentId, setStudentId] = useState("");
-  const [eventType, setEventType] = useState("SEMESTER_FINAL");
-  const [payloadStr, setPayloadStr] = useState('{\n  "semester": "Semester 2",\n  "gpa": "9.12",\n  "credits": 20\n}');
+  const [academicYear, setAcademicYear] = useState("2025-2026");
+  const [semesterName, setSemesterName] = useState("Semester 2");
+  const [courseCode, setCourseCode] = useState("");
+  const [courseName, setCourseName] = useState("");
+  const [courseCredits, setCourseCredits] = useState("4");
+  const [courseGrade, setCourseGrade] = useState("A");
+  const [courseMarks, setCourseMarks] = useState("");
   const [ingesting, setIngesting] = useState(false);
 
   // Revocation modal
@@ -68,26 +73,22 @@ export default function InstitutionIssuancePage() {
     e.preventDefault();
     setIngesting(true);
     try {
-      let parsedPayload = {};
-      try {
-        parsedPayload = JSON.parse(payloadStr);
-      } catch (_) {
-        alert("Metadata must be a valid JSON string");
-        setIngesting(false);
+      if (!studentId || !courseCode.trim() || !courseName.trim()) {
+        alert("Select a student and complete the course details.");
         return;
       }
-
-      const res = await api.ingestEvent(selectedInst.id, {
-        student_id: studentId,
-        event_type: eventType,
-        payload: parsedPayload
+      await api.createSemesterRecord(studentId, {
+        institution_id: selectedInst.id,
+        academic_year: academicYear,
+        semester_number: Number(semesterName.replace(/\D/g, "")) || 1,
+        semester_name: semesterName,
+        course_results: [{
+          course_code: courseCode.trim(), course_name: courseName.trim(),
+          credits: Number(courseCredits), grade: courseGrade,
+          ...(courseMarks ? { marks: Number(courseMarks) } : {})
+        }]
       });
-
-      if (res.errors && res.errors.length > 0) {
-        alert(`Ingested, but Trust Engine warned: ${res.errors.join(", ")}`);
-      } else {
-        alert("Academic record successfully written to database source-of-truth.");
-      }
+      alert("Semester record validated and submitted for registrar approval.");
 
       loadIssuanceData();
     } catch (err: any) {
@@ -260,28 +261,27 @@ export default function InstitutionIssuancePage() {
                     </select>
                   </div>
 
-                  {/* Event Type */}
+                  {/* Structured semester record */}
                   <div>
-                    <label className="text-[10px] text-slate-400 font-mono block mb-1 uppercase font-bold">Event Type</label>
+                    <label className="text-[10px] text-slate-400 font-mono block mb-1 uppercase font-bold">Academic Year</label>
                     <select
-                      value={eventType}
-                      onChange={(e) => setEventType(e.target.value)}
+                      value={academicYear}
+                      onChange={(e) => setAcademicYear(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-slate-500/20 font-bold cursor-pointer"
                     >
-                      <option value="SEMESTER_FINAL">Semester Academic Record</option>
-                      <option value="DEGREE_AWARD">Degree Certificate</option>
-                      <option value="MIGRATION_REQ">Migration Certificate</option>
+                      <option>2025-2026</option><option>2024-2025</option><option>2023-2024</option>
                     </select>
                   </div>
 
-                  {/* JSON Payload */}
-                  <div>
-                    <label className="text-[10px] text-slate-400 font-mono block mb-1 uppercase font-bold">Payload metadata (JSON)</label>
-                    <textarea
-                      value={payloadStr}
-                      onChange={(e) => setPayloadStr(e.target.value)}
-                      className="w-full h-28 bg-[#1E1E1E] text-emerald-400 border border-slate-800 text-xs font-mono rounded-xl p-3 focus:outline-none resize-none"
-                    />
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Semester<select value={semesterName} onChange={(e) => setSemesterName(e.target.value)} className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold"><option>Semester 1</option><option>Semester 2</option><option>Semester 3</option><option>Semester 4</option><option>Semester 5</option><option>Semester 6</option><option>Semester 7</option><option>Semester 8</option></select></label>
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Credits<input type="number" min="1" max="60" value={courseCredits} onChange={(e) => setCourseCredits(e.target.value)} className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold" /></label>
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Course code<input required value={courseCode} onChange={(e) => setCourseCode(e.target.value)} placeholder="CS401" className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold" /></label>
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Grade<select value={courseGrade} onChange={(e) => setCourseGrade(e.target.value)} className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold"><option>A+</option><option>A</option><option>B+</option><option>B</option><option>C</option><option>D</option><option>F</option></select></label>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Course name<input required value={courseName} onChange={(e) => setCourseName(e.target.value)} placeholder="Distributed Systems" className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold" /></label>
+                    <label className="text-[10px] text-slate-400 font-mono uppercase font-bold">Marks optional<input type="number" min="0" max="100" value={courseMarks} onChange={(e) => setCourseMarks(e.target.value)} placeholder="88" className="mt-1 w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 font-bold" /></label>
                   </div>
 
                   <button

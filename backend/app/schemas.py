@@ -89,6 +89,15 @@ class StudentInfoSchema(BaseModel):
     email: str
     matriculation_no: str
     wallet_address: Optional[str] = None
+    institution_id: Optional[UUID] = None
+    full_name: Optional[str] = None
+    registration_number: Optional[str] = None
+    department_id: Optional[UUID] = None
+    program_id: Optional[UUID] = None
+    admission_year: Optional[int] = None
+    expected_graduation_year: Optional[int] = None
+    current_semester: Optional[int] = None
+    academic_status: Optional[str] = None
 
 class StudentCredentialsResponse(BaseModel):
     student_id: UUID
@@ -156,6 +165,138 @@ class DocumentRequestResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class DepartmentCreate(BaseModel):
+    name: str
+    code: str
+
+
+class ProgramCreate(BaseModel):
+    department_id: Optional[UUID] = None
+    name: str
+    code: str
+    degree_type: str
+    duration_years: Optional[int] = None
+    total_semesters: Optional[int] = None
+
+
+class CourseCreate(BaseModel):
+    department_id: Optional[UUID] = None
+    program_id: Optional[UUID] = None
+    course_code: str
+    course_name: str
+    credits: float = Field(gt=0, le=60)
+    semester_number: Optional[int] = Field(default=None, ge=1, le=20)
+
+
+class InstitutionStudentCreate(BaseModel):
+    full_name: str = Field(min_length=2)
+    email: EmailStr
+    registration_number: str = Field(min_length=2)
+    department_id: Optional[UUID] = None
+    program_id: Optional[UUID] = None
+    admission_year: Optional[int] = Field(default=None, ge=1900, le=2200)
+    expected_graduation_year: Optional[int] = Field(default=None, ge=1900, le=2200)
+    current_semester: Optional[int] = Field(default=None, ge=1, le=20)
+    academic_status: str = "ACTIVE"
+
+
+class EnrollmentCreate(BaseModel):
+    program_id: UUID
+    admission_date: datetime
+    admission_year: int = Field(ge=1900, le=2200)
+
+
+class CourseResultCreate(BaseModel):
+    course_id: Optional[UUID] = None
+    course_code: str
+    course_name: str
+    credits: float = Field(gt=0, le=60)
+    grade: str = Field(min_length=1, max_length=3)
+    marks: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class SemesterRecordCreate(BaseModel):
+    institution_id: UUID
+    academic_year: str
+    semester_number: int = Field(ge=1, le=20)
+    semester_name: str
+    course_results: List[CourseResultCreate] = Field(min_length=1)
+
+
+class CourseResultResponse(CourseResultCreate):
+    id: UUID
+    grade_points: float
+
+    class Config:
+        from_attributes = True
+
+
+class SemesterRecordResponse(BaseModel):
+    id: UUID
+    student_id: UUID
+    institution_id: UUID
+    academic_year: str
+    semester_number: int
+    semester_name: str
+    total_credits: float
+    gpa: float
+    cgpa: float
+    status: str
+    course_results: List[CourseResultResponse]
+
+    class Config:
+        from_attributes = True
+
+
+class DegreeRecordCreate(BaseModel):
+    institution_id: UUID
+    program_id: Optional[UUID] = None
+    degree_name: str
+    graduation_year: int = Field(ge=1900, le=2200)
+    graduation_date: Optional[datetime] = None
+    final_cgpa: Optional[float] = Field(default=None, ge=0, le=10)
+    classification: Optional[str] = None
+
+
+class MigrationRecordCreate(BaseModel):
+    institution_id: UUID
+    destination_institution: str
+    reason: str
+    last_completed_semester: Optional[int] = Field(default=None, ge=1, le=20)
+    application_date: datetime
+
+
+class AchievementCreate(BaseModel):
+    title: str
+    category: str
+    issuer: str
+    issue_date: datetime
+    certificate_number: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AcademicImportRow(BaseModel):
+    registration_number: str
+    academic_year: str
+    semester_number: int = Field(ge=1, le=20)
+    semester_name: str
+    course_code: str
+    course_name: str
+    credits: float = Field(gt=0, le=60)
+    grade: str = Field(min_length=1, max_length=3)
+    marks: Optional[float] = Field(default=None, ge=0, le=100)
+
+
+class AcademicImportRequest(BaseModel):
+    import_type: str = "SEMESTER_RESULTS"
+    file_name: str = "structured-records.json"
+    rows: List[AcademicImportRow] = Field(min_length=1)
+
+
+class ReviewCaseStatusUpdate(BaseModel):
+    status: str = Field(pattern="^(APPROVED|REJECTED|CORRECTION_REQUESTED)$")
 
 class DocumentRequestIssueRequest(BaseModel):
     payload: Dict[str, Any] = Field(default_factory=dict)

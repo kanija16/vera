@@ -2,6 +2,15 @@
 
 VERA is a cryptographic academic-record verification system with student, institution, and verifier portals. This repository's demo uses a simulated local ledger with deployable contract semantics; Polygon deployment is intentionally configuration and operations work, not a capability claimed by the running demo.
 
+Generate a larger deterministic synthetic dataset without editing source code:
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m app.generate_dataset --output ..\data
+```
+
+Use `--students N` for a smaller local run. Generated JSON is an export/load fixture; the running demo seed remains intentionally lightweight and idempotent.
+
 # VERA — Decentralized Academic Trust & Migration Network
  
 > ### Solving the "Garbage In, Immutable Garbage" Problem in Academic Credentials
