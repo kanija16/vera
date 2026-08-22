@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, FileText, Send, Calendar, Clock, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, DocumentRequest, Institution } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, DocumentRequest, Institution, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function DocumentRequestsPage() {
   const DEMO_STUDENTS = [
@@ -252,9 +252,9 @@ export default function DocumentRequestsPage() {
                             <FileText className="h-5 w-5" />
                           </div>
                           <div>
-                            <span className="text-[10px] text-slate-400 font-mono block">REQUEST ID: {req.id.substring(0, 18)}...</span>
+                            <span className="text-[10px] text-slate-400 font-mono block">REQUEST ID: {truncateHash(req.id, 18)}</span>
                             <h4 className="text-sm font-bold text-slate-900 mt-0.5">
-                              {req.request_type.replace("_", " ")}
+                              {formatCredentialType(req.request_type)}
                             </h4>
                           </div>
                         </div>

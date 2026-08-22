@@ -841,6 +841,7 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         issuer_code=inst.code,
         institution_name=inst.name,
         credential_id=credential.id,
+        student_id=student.id,
         event_type=event.event_type,
         credential_type=event.event_type,
         payload=disclosed_payload,

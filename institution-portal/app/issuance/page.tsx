@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, Database, Plus, CheckCircle2, AlertTriangle, XCircle, Layers, ArrowRight, Activity, Terminal } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, AcademicEvent, Credential, Institution } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, AcademicEvent, Credential, Institution, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function InstitutionIssuancePage() {
   const [selectedInst] = useState({ id: "a1111111-1111-1111-1111-111111111111", code: "VERA-TECH", name: "VERA Institute of Technology" });
@@ -133,7 +133,7 @@ export default function InstitutionIssuancePage() {
   const handleAnchorBatch = async () => {
     try {
       const resp = await api.anchorBatch(selectedInst.id);
-      alert(`Batch Root 0x${resp.batch_root.substring(0, 16)}... anchored in tx ${resp.tx_hash.substring(0, 16)}...`);
+      alert(`Batch Root 0x${truncateHash(resp.batch_root)} anchored in tx ${truncateHash(resp.tx_hash)}`);
       loadIssuanceData();
     } catch (err: any) {
       alert(err.message || "Failed to anchor batch.");
@@ -365,7 +365,7 @@ export default function InstitutionIssuancePage() {
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-slate-900">{c.student_name}</span>
                             <span className="text-[9px] font-bold font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                              {c.credential_type.replace("_", " ")}
+                                    {formatCredentialType(c.credential_type)}
                             </span>
                             {c.status === 'ACTIVE' ? (
                               <span className="bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded text-[9px] font-bold border border-emerald-250">ACTIVE</span>
@@ -374,7 +374,7 @@ export default function InstitutionIssuancePage() {
                             )}
                           </div>
                           <p className="text-[10px] text-slate-500 font-mono mt-1 leading-normal">
-                            Root: {c.merkle_root.substring(0, 24)}... <br className="md:hidden" />
+                                    Root: {truncateHash(c.merkle_root, 24)} <br className="md:hidden" />
                             Tx: {c.onchain_tx_hash ? c.onchain_tx_hash.substring(0, 18) + "..." : "Simulated Local Anchored"}
                           </p>
                         </div>

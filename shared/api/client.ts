@@ -8,7 +8,10 @@ import {
   DocumentRequest,
   VerificationRequest,
   IntegrityRequest,
-  Notification
+  Notification,
+  ShareResponse,
+  AccessLog,
+  VerifyResponse
 } from '../types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1';
@@ -87,7 +90,8 @@ export const api = {
       `/students/${studentId}/credentials`
     ),
   getStudentEvents: (studentId: string) => request<any[]>(`/students/${studentId}/events`),
-  getStudentAccessHistory: (studentId: string) => request<{ access_logs: any[] }>(`/students/${studentId}/access-history`),
+  getStudentAccessHistory: (studentId: string) => request<{ access_logs: AccessLog[] }>(`/students/${studentId}/access-history`),
+  getStudentPermissions: (studentId: string) => request<Permission[]>(`/students/${studentId}/permissions`),
 
   // Document Requests
   createDocumentRequest: (studentId: string, data: { institution_id: string; request_type: string; purpose: string; details?: string }) =>
@@ -107,7 +111,7 @@ export const api = {
 
   // Sharing & Permissions
   shareCredential: (credId: string, data: { verifier_email?: string; verifier_label?: string; expires_in_seconds?: number; duration?: string; fields_allowed: string[] }) =>
-    request<Permission>(`/credentials/${credId}/share`, {
+    request<ShareResponse>(`/credentials/${credId}/share`, {
       method: 'POST',
       body: JSON.stringify(data)
     }),
@@ -117,7 +121,7 @@ export const api = {
     }),
 
   // Verification Portal
-  verifyToken: (accessToken: string) => request<any>(`/verify/${accessToken}`),
+  verifyToken: (accessToken: string) => request<VerifyResponse>(`/verify/${accessToken}`),
   createVerificationRequest: (data: { verifier_org: string; verifier_email: string; student_id: string; credential_id: string; details: string }) =>
     request<VerificationRequest>('/verify/verification-requests', {
       method: 'POST',

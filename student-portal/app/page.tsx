@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, Award, FileText, Share2, Bell, User, Clock, CheckCircle2, AlertTriangle, XCircle, ArrowRight, Plus, Eye, ChevronDown } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, Credential, DocumentRequest, Notification } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, Credential, DocumentRequest, Notification, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function StudentDashboard() {
   const DEMO_STUDENTS = [
@@ -220,10 +220,10 @@ export default function StudentDashboard() {
                         <div className="flex justify-between items-start gap-4">
                           <div>
                             <span className="text-[9px] font-bold font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                              {c.credential_type.replace("_", " ")}
+                              {formatCredentialType(c.credential_type)}
                             </span>
                             <h4 className="text-md font-bold text-slate-900 mt-2 capitalize">
-                              {c.credential_type.toLowerCase().replace("_", " ")} Record
+                              {formatCredentialType(c.credential_type)} Record
                             </h4>
                           </div>
                           {c.status === "ACTIVE" ? (
@@ -248,7 +248,7 @@ export default function StudentDashboard() {
 
                         <div className="flex items-center justify-between mt-5 pt-3 border-t border-slate-100">
                           <span className="text-[10px] font-mono text-slate-400">
-                            Tx: {c.onchain_tx_hash ? c.onchain_tx_hash.substring(0, 10) + "..." : "Not Anchored"}
+                            Tx: {truncateHash(c.onchain_tx_hash, 10)}
                           </span>
                           <Link href="/credentials" className="text-xs text-indigo-600 hover:text-indigo-700 font-bold">
                             View Proof &rarr;
@@ -314,7 +314,7 @@ export default function StudentDashboard() {
                         <div className="space-y-1">
                           <span className="font-bold text-slate-800 block leading-tight">{log.verifier_label}</span>
                           <span className="text-[10px] text-slate-500 block leading-tight">
-                            Viewed {log.credential_type.toLowerCase()} record
+                            Viewed {formatCredentialType(log.credential_type).toLowerCase()} record
                           </span>
                           <span className="text-[9px] text-slate-400 font-mono block">
                             {new Date(log.event_time).toLocaleString()}

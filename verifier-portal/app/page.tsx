@@ -101,25 +101,6 @@ export default function VerifierLanding() {
               </button>
             </form>
 
-            {/* Preseeded demo links */}
-            <div className="border-t border-slate-150 pt-5 space-y-3">
-              <span className="text-[9px] text-slate-400 font-mono block uppercase font-bold">Hackathon Demo Scenarios</span>
-              
-              <div className="grid grid-cols-2 gap-2 text-[10px] font-bold text-slate-650">
-                <Link href="/verify/mock_happy_pass" className="p-2 bg-slate-50 hover:bg-slate-100 rounded-lg text-center border border-slate-200/60 transition-colors">
-                  Happy Path
-                </Link>
-                <Link href="/verify/mock_tamper_pass" className="p-2 bg-red-50/50 hover:bg-red-50 text-red-650 rounded-lg text-center border border-red-200/30 transition-colors">
-                  Tamper Check
-                </Link>
-                <Link href="/verify/mock_review_pass" className="p-2 bg-amber-50/50 hover:bg-amber-50 text-amber-650 rounded-lg text-center border border-amber-200/30 transition-colors">
-                  Anomaly Flag
-                </Link>
-                <Link href="/verify/mock_revoke_pass" className="p-2 bg-red-50/50 hover:bg-red-50 text-red-650 rounded-lg text-center border border-red-200/30 transition-colors">
-                  Revocation
-                </Link>
-              </div>
-            </div>
           </div>
         </div>
 

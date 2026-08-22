@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, Users, FileText, Database, Settings, ArrowRight, Eye, Plus, CheckCircle2, AlertTriangle, RefreshCw, Layers, ShieldAlert, Award } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Institution, Student, DocumentRequest, AuditLog, AcademicEvent } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Institution, Student, DocumentRequest, AuditLog, AcademicEvent, truncateHash } from "@shared/types";
 
 export default function InstitutionDashboard() {
   const DEMO_INSTITUTIONS = [
@@ -207,7 +207,7 @@ export default function InstitutionDashboard() {
                                 {req.request_type}
                               </span>
                               <h4 className="text-xs font-bold text-slate-900">
-                                Student ID: {req.student_id.substring(0, 8)}...
+                                Student ID: {truncateHash(req.student_id, 8)}
                               </h4>
                             </div>
                             <p className="text-[11px] text-slate-500 mt-1 font-semibold">Purpose: {req.purpose}</p>

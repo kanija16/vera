@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, FileText, Send, CheckCircle2, XCircle, AlertTriangle, MessageSquare } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { DocumentRequest } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { DocumentRequest, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function InstitutionRequestsPage() {
   const [selectedInst] = useState({ id: "a1111111-1111-1111-1111-111111111111", code: "VERA-TECH" });
@@ -126,9 +126,9 @@ export default function InstitutionRequestsPage() {
                       <FileText className="h-5 w-5" />
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-450 font-mono block">ID: {req.id.substring(0, 18)}...</span>
+                      <span className="text-[9px] text-slate-450 font-mono block">ID: {truncateHash(req.id, 18)}</span>
                       <h4 className="text-sm font-bold text-slate-900 mt-0.5">
-                        Request {req.request_type.replace("_", " ")}
+                        Request {formatCredentialType(req.request_type)}
                       </h4>
                     </div>
                   </div>
@@ -198,7 +198,7 @@ export default function InstitutionRequestsPage() {
             </button>
             <h3 className="text-md font-bold text-slate-900">Update Document Request</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Review student request for {activeReq.request_type.replace("_", " ")}. Set official operational status and leave response remarks.
+              Review student request for {formatCredentialType(activeReq.request_type)}. Set official operational status and leave response remarks.
             </p>
 
             <div className="space-y-1">

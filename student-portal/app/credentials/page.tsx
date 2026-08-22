@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, Award, Eye, CheckCircle2, XCircle, ArrowLeft, Terminal, Copy } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, Credential } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, Credential, formatCredentialType, formatFieldName, truncateHash } from "@shared/types";
 
 export default function CredentialsPortfolio() {
   const DEMO_STUDENTS = [
@@ -135,7 +135,7 @@ export default function CredentialsPortfolio() {
                     >
                       <div className="flex justify-between items-start gap-3">
                         <span className="text-[9px] font-bold font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                          {c.credential_type.replace("_", " ")}
+                          {formatCredentialType(c.credential_type)}
                         </span>
                         {c.status === "ACTIVE" ? (
                           <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
@@ -148,9 +148,9 @@ export default function CredentialsPortfolio() {
                         )}
                       </div>
                       <h4 className="text-md font-bold text-slate-900 mt-2.5 capitalize">
-                        {c.credential_type.toLowerCase().replace("_", " ")} Record
+                        {formatCredentialType(c.credential_type)} Record
                       </h4>
-                      <p className="text-[10px] text-slate-400 mt-1 font-mono">ID: {c.id.substring(0, 18)}...</p>
+                      <p className="text-[10px] text-slate-400 mt-1 font-mono">ID: {truncateHash(c.id, 18)}</p>
                     </button>
                   );
                 })}
@@ -169,7 +169,7 @@ export default function CredentialsPortfolio() {
                       <div>
                         <span className="text-[9px] font-mono tracking-widest text-indigo-600 font-bold block uppercase">VERA VERIFIABLE RECORD</span>
                         <h3 className="text-xl font-bold text-slate-900 mt-1 capitalize">
-                          Official {selectedCred.credential_type.toLowerCase().replace("_", " ")}
+                          Official {formatCredentialType(selectedCred.credential_type)}
                         </h3>
                       </div>
                       <span className="text-xs bg-slate-100 text-slate-600 px-3 py-1 rounded-xl font-mono uppercase font-bold">
@@ -181,7 +181,7 @@ export default function CredentialsPortfolio() {
                     <div className="grid md:grid-cols-2 gap-6 py-8">
                       {Object.entries(selectedCred.fields).map(([k, v]) => (
                         <div key={k} className="bg-slate-50 border border-slate-200/40 rounded-2xl p-4">
-                          <span className="text-[10px] font-mono text-slate-400 uppercase block">{k.replace("_", " ")}</span>
+                          <span className="text-[10px] font-mono text-slate-400 uppercase block">{formatFieldName(k)}</span>
                           <span className="text-sm font-bold text-slate-800 mt-1 block">{v}</span>
                         </div>
                       ))}

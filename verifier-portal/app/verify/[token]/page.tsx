@@ -4,13 +4,14 @@ import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { ShieldCheck, CheckCircle2, AlertTriangle, XCircle, Clock, Eye, ChevronDown, ChevronUp, ExternalLink, RefreshCw, Send, HelpCircle, FileText, ArrowLeft, Terminal } from "lucide-react";
-import { api } from "@/../shared/api/client";
+import { api } from "@shared/api/client";
+import { VerifyResponse, formatCredentialType } from "@shared/types";
 
 export default function VerificationResult() {
   const { token } = useParams() as { token: string };
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [verifyData, setVerifyData] = useState<any>(null);
+  const [verifyData, setVerifyData] = useState<VerifyResponse | null>(null);
   const [showTechnicalProof, setShowTechnicalProof] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -38,104 +39,15 @@ export default function VerificationResult() {
     } catch (err: any) {
       console.error("Verification failed:", err);
       setErrorMsg(err.message || "Failed to resolve token.");
-      setupMockFallback();
+      setVerifyData(null);
     } finally {
       setLoading(false);
     }
   };
 
-  const setupMockFallback = () => {
-    // Route mock responses based on token prefixes for demo safety
-    if (token.includes("tamper")) {
-      setVerifyData({
-        result: "tampered",
-        verifier_label: "Google Recruiting",
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        student_name: "Alice Smith",
-        institution_name: "VERA Institute of Technology",
-        credential_type: "transcript",
-        disclosed_fields: { student_name: "Alice Smith", roll_number: "MAT-2022-001", gpa: "9.95" },
-        merkle_root: "c961a9e5af8a28ecefd609f8030e2fbbf14c3478ebe4e59dfbb9b8792ac2b5c8",
-        onchain_tx_hash: "0xmocktx_0192348a823b8f102830f9a203f192aa302f829f02931a2c38d019f",
-        layered_checks: {
-          "Permission Not Expired/Revoked": true,
-          "On-Chain Credential Status Active": true,
-          "Merkle Proof Integrity Valid": false,
-          "Student Identity Matching": true,
-          "Timeline Consistency Checked": true,
-          "Cryptographic Audit Integrity": true
-        },
-        consistency_errors: []
-      });
-    } else if (token.includes("review") || token.includes("Emily") || token.includes("b5555555")) {
-      setVerifyData({
-        result: "review",
-        verifier_label: "Foreign University Admissions",
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        student_name: "Emily White",
-        institution_name: "VERA Institute of Technology",
-        credential_type: "migration_certificate",
-        disclosed_fields: { student_name: "Emily White", roll_number: "MAT-2022-005", migration_to: "Foreign University", reason: "Transfer" },
-        merkle_root: "768a34c28745cf6d8f0ab0ec959d1a9f8824799b6b5a20e28569e3d42fd38c9c",
-        onchain_tx_hash: "0xmocktxhash222222222222222222222222222222222222222222222222222",
-        layered_checks: {
-          "Permission Not Expired/Revoked": true,
-          "On-Chain Credential Status Active": true,
-          "Merkle Proof Integrity Valid": true,
-          "Student Identity Matching": true,
-          "Timeline Consistency Checked": false,
-          "Cryptographic Audit Integrity": true
-        },
-        consistency_errors: ["TIMELINE_INCONSISTENCY: Migration Certificate (2021-06-01) predates AdmissionRecord (2022-09-01)"]
-      });
-    } else if (token.includes("revoke")) {
-      setVerifyData({
-        result: "revoked",
-        verifier_label: "Google Recruiting",
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        student_name: "Alice Smith",
-        institution_name: "VERA Institute of Technology",
-        credential_type: "transcript",
-        disclosed_fields: { student_name: "Alice Smith", roll_number: "MAT-2022-001", gpa: "9.12" },
-        merkle_root: "c961a9e5af8a28ecefd609f8030e2fbbf14c3478ebe4e59dfbb9b8792ac2b5c8",
-        onchain_tx_hash: "0xmocktx_0192348a823b8f102830f9a203f192aa302f829f02931a2c38d019f",
-        layered_checks: {
-          "Permission Not Expired/Revoked": true,
-          "On-Chain Credential Status Active": false,
-          "Merkle Proof Integrity Valid": true,
-          "Student Identity Matching": true,
-          "Timeline Consistency Checked": true,
-          "Cryptographic Audit Integrity": true
-        },
-        consistency_errors: []
-      });
-    } else {
-      setVerifyData({
-        result: "verified",
-        verifier_label: "Google Recruiting",
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-        student_name: "Alice Smith",
-        institution_name: "VERA Institute of Technology",
-        credential_type: "transcript",
-        disclosed_fields: { student_name: "Alice Smith", roll_number: "MAT-2022-001", gpa: "9.12" },
-        merkle_root: "c961a9e5af8a28ecefd609f8030e2fbbf14c3478ebe4e59dfbb9b8792ac2b5c8",
-        onchain_tx_hash: "0xmocktx_0192348a823b8f102830f9a203f192aa302f829f02931a2c38d019f",
-        layered_checks: {
-          "Permission Not Expired/Revoked": true,
-          "On-Chain Credential Status Active": true,
-          "Merkle Proof Integrity Valid": true,
-          "Student Identity Matching": true,
-          "Timeline Consistency Checked": true,
-          "Cryptographic Audit Integrity": true
-        },
-        consistency_errors: []
-      });
-    }
-  };
-
   const handleManualSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!verifierOrg || !verifierEmail || !manualDetails) {
+    if (!verifyData || !verifierOrg || !verifierEmail || !manualDetails) {
       alert("Please fill in all verifier and request details.");
       return;
     }
@@ -144,7 +56,7 @@ export default function VerificationResult() {
       await api.createVerificationRequest({
         verifier_org: verifierOrg,
         verifier_email: verifierEmail,
-        student_id: verifyData.student_id || "b1111111-1111-1111-1111-111111111111", // Alice Smith default
+        student_id: verifyData.student_id,
         credential_id: verifyData.credential_id,
         details: manualDetails
       });
@@ -159,7 +71,7 @@ export default function VerificationResult() {
 
   const handlePlagSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!workDetails || !concernDesc || !verifierOrg || !verifierEmail) {
+    if (!verifyData || !workDetails || !concernDesc || !verifierOrg || !verifierEmail) {
       alert("Please fill in all details for the integrity review request.");
       return;
     }
@@ -183,6 +95,7 @@ export default function VerificationResult() {
   };
 
   const renderBanner = () => {
+    if (!verifyData) return null;
     switch (verifyData.result) {
       case "verified":
         return (
@@ -268,6 +181,16 @@ export default function VerificationResult() {
             <div className="h-9 w-9 border-3 border-purple-600 border-t-transparent rounded-full animate-spin" />
             <p className="text-sm font-mono text-slate-400">Executing VERA check suites...</p>
           </div>
+        ) : errorMsg || !verifyData ? (
+          <div className="bg-white border border-red-200 rounded-3xl p-8 text-center space-y-4 shadow-sm">
+            <XCircle className="h-12 w-12 text-red-500 mx-auto" />
+            <h2 className="text-xl font-bold text-slate-900">Unable to verify this pass</h2>
+            <p className="text-sm text-slate-500">{errorMsg || "The verification service returned no result."}</p>
+            <div className="flex justify-center gap-3">
+              <button onClick={runVerification} className="bg-purple-600 text-white rounded-xl px-4 py-2 text-xs font-bold">Retry verification</button>
+              <button onClick={() => router.push("/verify")} className="bg-slate-100 text-slate-700 rounded-xl px-4 py-2 text-xs font-bold">Back to scanner</button>
+            </div>
+          </div>
         ) : (
           <div className="space-y-8">
             <Link href="/" className="flex items-center gap-1.5 text-xs text-slate-450 hover:text-slate-800 font-bold">
@@ -291,10 +214,10 @@ export default function VerificationResult() {
                 <div className="flex justify-between items-center border-b border-slate-100 pb-3">
                   <div>
                     <h3 className="text-xs font-mono uppercase tracking-widest text-slate-450 font-bold">Disclosed Properties</h3>
-                    <p className="text-[10px] text-slate-400 mt-0.5">Target: {verifyData.verifier_label || "Verified Recipient"}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Target: Verified Recipient</p>
                   </div>
                   <span className="text-[10px] font-mono font-bold uppercase bg-slate-100 text-slate-650 px-2 py-0.5 rounded">
-                    {verifyData.credential_type.replace("_", " ")}
+                    {formatCredentialType(verifyData.credential_type)}
                   </span>
                 </div>
 

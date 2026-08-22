@@ -40,6 +40,58 @@ export interface Credential {
   student_name?: string; // resolved locally or returned in registry lists
 }
 
+export interface ShareResponse {
+  permission_id: string;
+  access_token: string;
+  expires_at: string;
+}
+
+export interface AccessLog {
+  event_time: string;
+  verifier_label: string;
+  credential_type: string;
+  disclosed_fields_count: number;
+  result: string;
+  permission_id?: string | null;
+}
+
+export interface VerifyResponse {
+  status: string;
+  result: string;
+  student_name: string;
+  matriculation_no: string;
+  issuer_name: string;
+  issuer_code: string;
+  institution_name: string;
+  credential_id: string;
+  student_id: string;
+  event_type: string;
+  credential_type: string;
+  payload: Record<string, unknown>;
+  disclosed_fields: Record<string, unknown>;
+  merkle_root: string;
+  onchain_status: string;
+  onchain_tx_hash?: string | null;
+  checks: Record<string, boolean>;
+  layered_checks: Record<string, boolean>;
+  consistency_errors: string[];
+  salts: Record<string, string>;
+  merkle_proofs: Record<string, Array<Record<string, string>>>;
+}
+
+export function truncateHash(value?: string | null, length = 16): string {
+  return value ? `${value.slice(0, length)}...` : "Not anchored";
+}
+
+export function formatCredentialType(value?: string | null): string {
+  if (!value) return "Unknown Credential";
+  return value.replace(/_/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+export function formatFieldName(value?: string | null): string {
+  return value ? value.replace(/_/g, " ") : "Unknown Field";
+}
+
 export interface Permission {
   id: string;
   credential_id: string;

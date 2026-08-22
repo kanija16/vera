@@ -111,6 +111,7 @@ class VerifyResponse(BaseModel):
     issuer_code: str
     institution_name: str  # copy of issuer_name for frontend compatibility
     credential_id: UUID
+    student_id: UUID
     event_type: str
     credential_type: str  # copy of event_type for frontend compatibility
     payload: Dict[str, Any]

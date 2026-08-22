@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, Clock, Eye, CheckCircle2, AlertTriangle, XCircle, Search } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, formatCredentialType } from "@shared/types";
 
 export default function VerificationHistoryPage() {
   const DEMO_STUDENTS = [
@@ -149,7 +149,7 @@ export default function VerificationHistoryPage() {
                         <h4 className="text-sm font-bold text-slate-900">{log.verifier_label}</h4>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                           <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono uppercase font-bold text-[9px]">
-                            {log.credential_type.replace("_", " ")}
+                            {formatCredentialType(log.credential_type)}
                           </span>
                           <span>&bull;</span>
                           <span className="font-semibold text-slate-600">{log.disclosed_fields_count} fields read</span>

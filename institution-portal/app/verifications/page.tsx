@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, CheckCircle2, AlertTriangle, XCircle, Search, Clock, FileText, Check } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { VerificationRequest, IntegrityRequest } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { VerificationRequest, IntegrityRequest, formatCredentialType } from "@shared/types";
 
 export default function InstitutionVerificationsPage() {
   const [selectedInst] = useState({ id: "a1111111-1111-1111-1111-111111111111", code: "VERA-TECH", name: "VERA Institute of Technology" });
@@ -187,7 +187,7 @@ export default function InstitutionVerificationsPage() {
                           i.status === 'PENDING' ? 'bg-blue-50 text-blue-600 border-blue-200' :
                           i.status === 'NO_ISSUE_FOUND' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'
                         }`}>
-                          {i.status.replace("_", " ")}
+                          {formatCredentialType(i.status)}
                         </span>
                       </div>
                       

@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, Users, Search, Database, FileText, CheckCircle2, XCircle, Clock, Eye, AlertTriangle } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, Credential, DocumentRequest } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, Credential, DocumentRequest, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function StudentManagement() {
   const [selectedInst] = useState({ id: "a1111111-1111-1111-1111-111111111111", code: "VERA-TECH" });
@@ -204,10 +204,10 @@ export default function StudentManagement() {
                               <div key={c.id} className="p-3 bg-slate-50 border border-slate-200/60 rounded-xl flex justify-between items-center">
                                 <div>
                                   <span className="font-bold text-slate-800 capitalize">
-                                    {c.credential_type.toLowerCase().replace("_", " ")}
+                                    {formatCredentialType(c.credential_type)}
                                   </span>
                                   <span className="text-[9px] font-mono text-slate-400 block mt-0.5 truncate max-w-[200px]">
-                                    Root: {c.merkle_root.substring(0, 16)}...
+                                    Root: {truncateHash(c.merkle_root)}
                                   </span>
                                 </div>
                                 <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
@@ -231,7 +231,7 @@ export default function StudentManagement() {
                             {studentRequests.map((r) => (
                               <div key={r.id} className="p-3 bg-slate-50 border border-slate-200/60 rounded-xl flex justify-between items-center">
                                 <div>
-                                  <span className="font-bold text-slate-800 capitalize">{r.request_type.toLowerCase()}</span>
+                                  <span className="font-bold text-slate-800 capitalize">{formatCredentialType(r.request_type)}</span>
                                   <span className="text-[9px] text-slate-400 block mt-0.5">{r.purpose}</span>
                                 </div>
                                 <span className="text-[10px] font-semibold bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
@@ -257,7 +257,7 @@ export default function StudentManagement() {
                                 <div className="space-y-0.5">
                                   <span className="font-bold text-slate-800 block leading-tight">{log.verifier_label}</span>
                                   <span className="text-[10px] text-slate-500 block">
-                                    Viewed {log.credential_type.toLowerCase()} record
+                                    Viewed {formatCredentialType(log.credential_type).toLowerCase()} record
                                   </span>
                                   <span className="text-[9px] text-slate-400 font-mono block">
                                     {new Date(log.event_time).toLocaleString()}

@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, Database, Clock } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { AuditLog } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { AuditLog } from "@shared/types";
 
 export default function InstitutionAuditPage() {
   const [selectedInst] = useState({ id: "a1111111-1111-1111-1111-111111111111", code: "VERA-TECH", name: "VERA Institute of Technology" });

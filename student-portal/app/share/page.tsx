@@ -3,8 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, ArrowLeft, Share2, QrCode, Copy, Trash2, Clock, CheckCircle2, XCircle, FileText, ChevronRight, RefreshCw, HelpCircle } from "lucide-react";
-import { api } from "@/../shared/api/client";
-import { Student, Credential, Permission } from "@/../shared/types";
+import { api } from "@shared/api/client";
+import { Student, Credential, Permission, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function DocumentSharingPage() {
   const DEMO_STUDENTS = [
@@ -79,12 +79,8 @@ export default function DocumentSharingPage() {
 
   const fetchActivePermissions = async () => {
     try {
-      const url = `http://localhost:8000/api/v1/students/${studentId}/permissions`;
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setPermissions(data);
-      }
+      const data = await api.getStudentPermissions(studentId);
+      setPermissions(data);
     } catch (err) {
       console.error("Failed to load permissions:", err);
     }
@@ -238,7 +234,7 @@ export default function DocumentSharingPage() {
                           >
                             {credentials.map(c => (
                               <option key={c.id} value={c.id}>
-                                {c.credential_type.replace("_", " ")} Record (ID: {c.id.substring(0, 8)}...)
+                                {formatCredentialType(c.credential_type)} Record (ID: {truncateHash(c.id, 8)})
                               </option>
                             ))}
                           </select>
@@ -440,7 +436,7 @@ export default function DocumentSharingPage() {
                     <div key={p.id} className="bg-white border border-slate-200/80 rounded-2xl p-4.5 shadow-sm space-y-4 flex flex-col justify-between">
                       <div className="flex justify-between items-start gap-4">
                         <div className="space-y-1">
-                          <span className="text-[9px] font-mono text-slate-400 block">PASS ID: {p.id.substring(0, 14)}...</span>
+                                    <span className="text-[9px] font-mono text-slate-400 block">PASS ID: {truncateHash(p.id, 14)}</span>
                           <h4 className="text-xs font-bold text-slate-800 leading-tight">
                             {p.verifier_email}
                           </h4>
