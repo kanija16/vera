@@ -1,10 +1,15 @@
 import os
+from dotenv import load_dotenv
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-# Retrieve database URL from environment or fallback
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:postgrespassword@db:5432/vera")
+load_dotenv()
+
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "sqlite+aiosqlite:///./vera.db"
+)
 
 # Convert standard postgres/sqlite schemes to async equivalent
 if DATABASE_URL.startswith("postgresql://"):
