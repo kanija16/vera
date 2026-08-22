@@ -1,3 +1,7 @@
+# VERA
+
+VERA is a cryptographic academic-record verification system with student, institution, and verifier portals. This repository's demo uses a simulated local ledger with deployable contract semantics; Polygon deployment is intentionally configuration and operations work, not a capability claimed by the running demo.
+
 # VERA — Decentralized Academic Trust & Migration Network
  
 > ### Solving the "Garbage In, Immutable Garbage" Problem in Academic Credentials

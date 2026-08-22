@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ShieldCheck, Users, FileText, Database, Settings, ArrowRight, Eye, Plus, CheckCircle2, AlertTriangle, RefreshCw, Layers, ShieldAlert, Award } from "lucide-react";
 import { api } from "@shared/api/client";
-import { Institution, Student, DocumentRequest, AuditLog, AcademicEvent, truncateHash } from "@shared/types";
+import { Institution, Student, DocumentRequest, AuditLog, AcademicEvent, formatCredentialType, truncateHash } from "@shared/types";
 
 export default function InstitutionDashboard() {
   const DEMO_INSTITUTIONS = [
@@ -163,13 +163,13 @@ export default function InstitutionDashboard() {
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <span className="text-[9px] font-bold font-mono uppercase bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded">
-                                {ev.event_type}
+                                {formatCredentialType(ev.event_type)}
                               </span>
                               <h4 className="text-xs font-bold text-slate-900">{ev.student_name}</h4>
                             </div>
-                            <code className="text-[10px] text-slate-400 block font-mono bg-slate-50 border border-slate-100 rounded-md p-1 truncate max-w-md">
-                              {JSON.stringify(ev.payload)}
-                            </code>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded-md p-2 max-w-md">
+                              {Object.entries(ev.payload || {}).slice(0, 3).map(([key, value]) => <span key={key}><strong className="font-semibold text-slate-400">{formatCredentialType(key)}:</strong> {String(value)}</span>)}
+                            </div>
                           </div>
                           
                           <Link
@@ -204,7 +204,7 @@ export default function InstitutionDashboard() {
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="text-[9px] font-bold font-mono uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
-                                {req.request_type}
+                                {formatCredentialType(req.request_type)}
                               </span>
                               <h4 className="text-xs font-bold text-slate-900">
                                 Student ID: {truncateHash(req.student_id, 8)}

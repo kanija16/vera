@@ -59,6 +59,14 @@ class FinalizeResponse(BaseModel):
     version: int
     blockchain_tx: Dict[str, Any]
 
+class CohortFinalizeRequest(BaseModel):
+    event_ids: List[UUID]
+
+class CohortFinalizeResponse(BaseModel):
+    finalized_count: int
+    batch_root: str
+    tx_hash: str
+
 # Student credential list schemas
 class CredentialResponseItem(BaseModel):
     id: UUID
@@ -122,6 +130,7 @@ class VerifyResponse(BaseModel):
     checks: Dict[str, bool]
     layered_checks: Dict[str, bool]
     consistency_errors: List[str]
+    ai_explanation: Optional[str] = None
     salts: Dict[str, str] = Field(default_factory=dict)
     merkle_proofs: Dict[str, List[Dict[str, str]]] = Field(default_factory=dict)
 
@@ -147,6 +156,9 @@ class DocumentRequestResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class DocumentRequestIssueRequest(BaseModel):
+    payload: Dict[str, Any] = Field(default_factory=dict)
 
 
 # Verification request schemas

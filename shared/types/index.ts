@@ -75,6 +75,7 @@ export interface VerifyResponse {
   checks: Record<string, boolean>;
   layered_checks: Record<string, boolean>;
   consistency_errors: string[];
+  ai_explanation?: string | null;
   salts: Record<string, string>;
   merkle_proofs: Record<string, Array<Record<string, string>>>;
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { ShieldCheck, Award, FileText, Share2, Bell, User, Clock, CheckCircle2, AlertTriangle, XCircle, ArrowRight, Plus, Eye, ChevronDown } from "lucide-react";
+import { ShieldCheck, Award, FileText, Share2, Bell, User, Clock, CheckCircle2, AlertTriangle, XCircle, ArrowRight, Plus, Eye, ChevronDown, Sparkles } from "lucide-react";
 import { api } from "@shared/api/client";
 import { Student, Credential, DocumentRequest, Notification, formatCredentialType, truncateHash } from "@shared/types";
 
@@ -20,6 +20,7 @@ export default function StudentDashboard() {
   const [accessLogs, setAccessLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -33,6 +34,12 @@ export default function StudentDashboard() {
       const credData = await api.getStudentCredentials(studentId);
       setStudentInfo(credData.student);
       setCredentials(credData.credentials);
+      try {
+        const insight = await api.getStudentSummary(studentId);
+        setAiSummary(insight.summary);
+      } catch {
+        setAiSummary(null);
+      }
 
       // 2. Fetch requests
       const reqData = await api.getStudentDocumentRequests(studentId);
@@ -66,7 +73,7 @@ export default function StudentDashboard() {
   const pendingRequestsCount = requests.filter(r => r.status !== "ISSUED" && r.status !== "REJECTED").length;
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] text-slate-800 flex flex-col font-sans">
+    <div className="vera-app min-h-screen bg-[#F7F7F5] text-slate-800 flex flex-col font-sans">
       {/* Top Navbar */}
       <header className="bg-white border-b border-slate-200/80 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
@@ -106,7 +113,7 @@ export default function StudentDashboard() {
       </header>
 
       {/* Main Grid */}
-      <main className="max-w-7xl mx-auto px-6 py-10 flex-grow w-full grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <main className="max-w-7xl mx-auto px-6 py-10 flex-grow w-full">
         
         {loading ? (
           <div className="col-span-3 h-96 flex flex-col items-center justify-center gap-3">
@@ -263,6 +270,11 @@ export default function StudentDashboard() {
 
             {/* Right Col: Notifications alerts and Access history */}
             <div className="space-y-8">
+              <div className="border border-teal-100 bg-teal-50 rounded-3xl p-6 space-y-3">
+                <div className="flex items-center gap-2 text-teal-800"><Sparkles className="h-4 w-4" /><h3 className="text-xs font-bold uppercase tracking-widest">Academic insight</h3></div>
+                <p className="text-sm leading-relaxed text-teal-950">{aiSummary || "Preparing an insight from your verified records..."}</p>
+                <p className="text-[10px] font-semibold text-teal-700">AI-generated summary grounded in verified credential records. Not an official decision.</p>
+              </div>
               
               {/* Notifications Alert Feed */}
               <div className="bg-white border border-slate-200/80 rounded-3xl p-6 space-y-4">

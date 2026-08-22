@@ -2,6 +2,8 @@ import time
 import uuid
 import hashlib
 import secrets
+import os
+from collections import defaultdict, deque
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -12,18 +14,26 @@ from sqlalchemy.future import select
 
 from app.database import engine, get_db, AsyncSessionLocal, bootstrap_database
 from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch, DocumentRequest, VerificationRequest, IntegrityRequest, Notification
-from app.schemas import EventCreate, EventResponse, FinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse, StudentInfoSchema, DocumentRequestCreate, DocumentRequestResponse, VerificationRequestCreate, VerificationRequestResponse, IntegrityRequestCreate, IntegrityRequestResponse, NotificationResponse
+from app.schemas import EventCreate, EventResponse, FinalizeResponse, CohortFinalizeRequest, CohortFinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse, StudentInfoSchema, DocumentRequestCreate, DocumentRequestResponse, DocumentRequestIssueRequest, VerificationRequestCreate, VerificationRequestResponse, IntegrityRequestCreate, IntegrityRequestResponse, NotificationResponse
 from app.services.crypto import build_merkle_tree, generate_hmac_token, verify_hmac_token, verify_merkle_proof, canonicalize_json, generate_merkle_proof, sign_message_ecdsa, verify_signature_ecdsa
 from app.services.validator import ConsistencyAnomalyEngine
+from app.services.explainer import explain_consistency_errors, generate_student_summary
 from app.services.blockchain import BlockchainLedgerSimulator, blockchain_service
 from app.seed import seed_db
 
 app = FastAPI(title="VERA v1 Cryptographic Academic Trust Network", version="1.0.0")
 
+_verification_requests: dict[str, deque[float]] = defaultdict(deque)
+_MAX_VERIFICATION_REQUESTS = 30
+_VERIFICATION_WINDOW_SECONDS = 60
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000", "http://localhost:3001", "http://localhost:3002",
+        "http://127.0.0.1:3000", "http://127.0.0.1:3001", "http://127.0.0.1:3002",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,6 +42,8 @@ app.add_middleware(
 # Startup async DB creation & seeding
 @app.on_event("startup")
 async def startup_event():
+    if os.getenv("SECRET_KEY") == "vera_cryptographic_secret_key_2026" and os.getenv("ENV") != "development":
+        raise RuntimeError("Refusing to start with default SECRET_KEY in non-development environment.")
     print("[STARTUP] Connecting async database engine...")
     await bootstrap_database(engine)
     try:
@@ -493,6 +505,14 @@ async def anchor_batch(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 # 5d. POST /api/v1/institutions/{inst_id}/events/{event_id}/finalize -> E2E finalize wrapper (triggers full flow)
 @app.post("/api/v1/institutions/{inst_id}/events/{event_id}/finalize", response_model=FinalizeResponse)
 async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=403, detail="Only ACCREDITED institutions can finalize credentials.")
+
     # Find active clerk and officer keys for this institution
     clerk_stmt = select(InstitutionOfficer).filter(
         InstitutionOfficer.institution_id == inst_id,
@@ -532,9 +552,36 @@ async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSessi
             "merkle_root": credential.merkle_root,
             "batch_root": batch_res.batch_root,
             "tx_hash": batch_res.tx_hash,
-            "anchor_type": "LOCAL_DEMO" if blockchain_service.__class__.__name__ == "DevelopmentAnchorService" else "REAL_TESTNET"
+            "anchor_type": "SIMULATED_LEDGER"
         }
     )
+
+
+@app.post("/api/v1/institutions/{inst_id}/events/finalize-cohort", response_model=CohortFinalizeResponse)
+async def finalize_cohort(inst_id: uuid.UUID, req: CohortFinalizeRequest, db: AsyncSession = Depends(get_db)):
+    inst_res = await db.execute(select(Institution).filter(Institution.id == inst_id))
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=403, detail="Only ACCREDITED institutions can finalize credentials.")
+    if not req.event_ids:
+        raise HTTPException(status_code=400, detail="At least one event is required.")
+
+    clerk_res = await db.execute(select(InstitutionOfficer).filter(InstitutionOfficer.institution_id == inst_id, InstitutionOfficer.role == "CLERK", InstitutionOfficer.is_active == True))
+    officer_res = await db.execute(select(InstitutionOfficer).filter(InstitutionOfficer.institution_id == inst_id, InstitutionOfficer.role == "EXAM_OFFICER", InstitutionOfficer.is_active == True))
+    clerk = clerk_res.scalar_one_or_none()
+    officer = officer_res.scalar_one_or_none()
+    if not clerk or not officer:
+        raise HTTPException(status_code=400, detail="Institution must have active clerk and exam officer registered.")
+
+    finalized_count = 0
+    for event_id in req.event_ids:
+        await propose_event(inst_id, event_id, ProposeRequest(clerk_id=clerk.id), db)
+        await approve_event(inst_id, event_id, ApproveRequest(exam_officer_id=officer.id), db)
+        finalized_count += 1
+    batch = await anchor_batch(inst_id, db)
+    return CohortFinalizeResponse(finalized_count=finalized_count, batch_root=batch.batch_root, tx_hash=batch.tx_hash)
 
 
 # 6. GET /api/v1/students/{student_id}/credentials -> List student credentials
@@ -597,6 +644,13 @@ async def list_student_credentials(student_id: uuid.UUID, db: AsyncSession = Dep
         student=student_info,
         credentials=response_items
     )
+
+
+@app.get("/api/v1/ai/student-summary/{student_id}")
+async def student_summary(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    response = await list_student_credentials(student_id, db)
+    records = [{"credential_type": credential.credential_type, "status": credential.status} for credential in response.credentials]
+    return {"summary": generate_student_summary(records, response.name), "grounded_in": "verified credential records"}
 
 
 
@@ -706,6 +760,15 @@ async def revoke_share_pass_delete(permission_id: uuid.UUID, db: AsyncSession = 
 # 9. GET /api/v1/verify/{access_token} -> Cryptographically verify and selectively disclose
 @app.get("/api/v1/verify/{access_token}", response_model=VerifyResponse)
 async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(get_db)):
+    now = time.time()
+    client_key = access_token[:24]
+    request_times = _verification_requests[client_key]
+    while request_times and now - request_times[0] > _VERIFICATION_WINDOW_SECONDS:
+        request_times.popleft()
+    if len(request_times) >= _MAX_VERIFICATION_REQUESTS:
+        raise HTTPException(status_code=429, detail="Verification rate limit exceeded. Try again shortly.")
+    request_times.append(now)
+
     is_valid_token, token_payload = verify_hmac_token(access_token)
     if not is_valid_token:
         raise HTTPException(
@@ -719,7 +782,9 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
     perm_stmt = select(Permission).filter(Permission.access_token == access_token)
     perm_res = await db.execute(perm_stmt)
     permission = perm_res.scalar_one_or_none()
-    if not permission or permission.is_revoked:
+    permission_expiry = permission.expires_at.replace(tzinfo=timezone.utc) if permission and permission.expires_at.tzinfo is None else permission.expires_at if permission else None
+    permission_valid = bool(permission and not permission.is_revoked and permission_expiry and permission_expiry > datetime.now(timezone.utc))
+    if not permission_valid:
         raise HTTPException(status_code=401, detail="Verification failed: Permission revoked by student.")
         
     cred_stmt = select(Credential).filter(Credential.id == uuid.UUID(cred_id))
@@ -739,6 +804,10 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
     inst_stmt = select(Institution).filter(Institution.id == event.institution_id)
     inst_res = await db.execute(inst_stmt)
     inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=403, detail="ISSUER_NOT_ACCREDITED: This institution is not currently accredited.")
     
     onchain = BlockchainLedgerSimulator.get_credential(cred_id)
     if not onchain:
@@ -804,14 +873,26 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         verification_status = "AUTHENTIC"
         result_state = "verified"
 
+    identity_valid = (
+        credential.student_id == event.student_id
+        and event.student_id == student.id
+        and permission.credential_id == credential.id
+        and permission.student_id == student.id
+    )
+    merkle_valid = checks["Off-Chain Payload Match On-Chain Merkle Root"]
     layered_checks = {
-        "Permission Not Expired/Revoked": True,
+        "Permission Not Expired/Revoked": permission_valid,
         "On-Chain Credential Status Active": (onchain_status == "ACTIVE"),
-        "Merkle Proof Integrity Valid": True,
-        "Student Identity Matching": True,
+        "Merkle Proof Integrity Valid": merkle_valid,
+        "Student Identity Matching": identity_valid,
         "Timeline Consistency Checked": (event.status != EventStatus.SUSPICIOUS_REVIEW.value),
         "Cryptographic Audit Integrity": has_valid_signatures
     }
+
+    if not identity_valid:
+        raise HTTPException(status_code=409, detail="IDENTITY_LINKAGE_FAILURE: Credential does not correctly link to this permission/student chain.")
+
+    ai_explanation = explain_consistency_errors(consistency_errors, event.event_type, student.name) if result_state == "review" else ""
 
     # Selective Disclosure Logic: filter down payload to allowed fields
     allowed_fields = list(permission.fields_allowed) if permission.fields_allowed else list(event.payload.keys())
@@ -852,6 +933,7 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         checks=checks,
         layered_checks=layered_checks,
         consistency_errors=consistency_errors,
+        ai_explanation=ai_explanation,
         salts=disclosed_salts,
         merkle_proofs=disclosed_proofs
     )
@@ -1144,6 +1226,39 @@ async def update_document_request_status(inst_id: uuid.UUID, req_id: uuid.UUID, 
         await db.commit()
         
     return doc_req
+
+
+@app.post("/api/v1/institutions/{inst_id}/document-requests/{req_id}/issue", response_model=FinalizeResponse)
+async def issue_document_request(inst_id: uuid.UUID, req_id: uuid.UUID, req: DocumentRequestIssueRequest, db: AsyncSession = Depends(get_db)):
+    inst_res = await db.execute(select(Institution).filter(Institution.id == inst_id))
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found.")
+    if inst.status != "ACCREDITED":
+        raise HTTPException(status_code=403, detail="Only ACCREDITED institutions can issue documents.")
+    request_res = await db.execute(select(DocumentRequest).filter(DocumentRequest.id == req_id, DocumentRequest.institution_id == inst_id))
+    document_request = request_res.scalar_one_or_none()
+    if not document_request:
+        raise HTTPException(status_code=404, detail="Document request not found.")
+    if document_request.status not in ("APPROVED", "PROCESSING"):
+        raise HTTPException(status_code=400, detail="Document request must be approved before issuance.")
+
+    event_type = document_request.request_type if document_request.request_type in {item.value for item in EventType} else EventType.SEMESTER_FINAL.value
+    payload = {"matriculation_no": "", "request_id": str(document_request.id), "purpose": document_request.purpose, **req.payload}
+    student = await db.get(Student, document_request.student_id)
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found.")
+    payload["matriculation_no"] = student.matriculation_no
+    event = AcademicEvent(institution_id=inst_id, student_id=student.id, event_type=event_type, payload=payload, trust_score=1.0, status=EventStatus.VALID.value, created_at=datetime.utcnow())
+    db.add(event)
+    await db.commit()
+    await db.refresh(event)
+    document_request.status = "PROCESSING"
+    await db.commit()
+    finalized = await finalize_event(inst_id, event.id, db)
+    document_request.status = "ISSUED"
+    await db.commit()
+    return finalized
 
 
 # 20. POST /api/v1/verify/verification-requests -> Create new verifier verification request

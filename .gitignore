@@ -6,6 +6,11 @@ Vera_Presentation.pdf
 .venv/
 venv/
 
+# Runtime environment files
+**/.env
+**/.env.*
+!.env.example
+
 # Python Cache Directories
 **/__pycache__/
 __pycache__/

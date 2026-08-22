@@ -71,6 +71,11 @@ export const api = {
     request<any>(`/institutions/${instId}/events/${eventId}/finalize`, {
       method: 'POST'
     }),
+  finalizeCohort: (instId: string, eventIds: string[]) =>
+    request<{ finalized_count: number; batch_root: string; tx_hash: string }>(`/institutions/${instId}/events/finalize-cohort`, {
+      method: 'POST',
+      body: JSON.stringify({ event_ids: eventIds })
+    }),
   anchorBatch: (instId: string) =>
     request<any>(`/institutions/${instId}/anchor-batch`, {
       method: 'POST'
@@ -89,6 +94,7 @@ export const api = {
     request<{ student_id: string; name: string; matriculation_no: string; student: Student; credentials: Credential[] }>(
       `/students/${studentId}/credentials`
     ),
+  getStudentSummary: (studentId: string) => request<{ summary: string; grounded_in: string }>(`/ai/student-summary/${studentId}`),
   getStudentEvents: (studentId: string) => request<any[]>(`/students/${studentId}/events`),
   getStudentAccessHistory: (studentId: string) => request<{ access_logs: AccessLog[] }>(`/students/${studentId}/access-history`),
   getStudentPermissions: (studentId: string) => request<Permission[]>(`/students/${studentId}/permissions`),
@@ -107,6 +113,11 @@ export const api = {
     request<DocumentRequest>(`/institutions/${instId}/document-requests/${reqId}/status`, {
       method: 'POST',
       body: JSON.stringify({ status, response_notes: responseNotes })
+    }),
+  issueDocumentRequest: (instId: string, reqId: string, payload: Record<string, unknown> = {}) =>
+    request<any>(`/institutions/${instId}/document-requests/${reqId}/issue`, {
+      method: 'POST',
+      body: JSON.stringify({ payload })
     }),
 
   // Sharing & Permissions

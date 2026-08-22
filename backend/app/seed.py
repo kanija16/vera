@@ -277,6 +277,91 @@ async def seed_db():
         else:
             print("[SEED] Student Emily White already exists.")
 
+        # 4. Seed a suspended issuer and one credential issued before suspension.
+        suspended_stmt = select(Institution).filter(Institution.code == "OFFSHORE-DIPLOMA")
+        suspended_res = await db.execute(suspended_stmt)
+        suspended = suspended_res.scalar_one_or_none()
+        if not suspended:
+            suspended_private, suspended_public = generate_ecdsa_keypair()
+            suspended = Institution(
+                id=uuid.UUID("a2222222-2222-2222-2222-222222222222"),
+                name="Offshore Diploma Mills Ltd",
+                code="OFFSHORE-DIPLOMA",
+                public_key=suspended_public,
+                status="SUSPENDED",
+                is_verified=False,
+                created_at=datetime(2022, 1, 1),
+            )
+            db.add(suspended)
+            await db.commit()
+
+        suspended_student = Student(
+            id=uuid.UUID("b2222222-2222-2222-2222-222222222222"),
+            name="Noah Patel",
+            email="noah.patel@example.com",
+            matriculation_no="MAT-2022-002",
+            wallet_address="0x2222222222222222222222222222222222222222",
+        )
+        existing_suspended_student = await db.get(Student, suspended_student.id)
+        if not existing_suspended_student:
+            db.add(suspended_student)
+            await db.commit()
+            suspended_event = AcademicEvent(
+                id=uuid.UUID("c2222222-2222-2222-2222-222222222222"),
+                institution_id=suspended.id,
+                student_id=suspended_student.id,
+                event_type=EventType.DEGREE_AWARD.value,
+                payload={"matriculation_no": suspended_student.matriculation_no, "degree": "Diploma in Business"},
+                trust_score=1.0,
+                status="ISSUED",
+                created_at=datetime(2024, 6, 1),
+            )
+            salts = {k: secrets.token_hex(16) for k in suspended_event.payload}
+            payload_bytes = canonicalize_json(suspended_event.payload)
+            _, suspended_root = build_merkle_tree(suspended_event.payload, salts)
+            db.add(suspended_event)
+            await db.commit()
+            suspended_credential = Credential(
+                id=suspended_event.id,
+                event_id=suspended_event.id,
+                student_id=suspended_student.id,
+                batch_id=None,
+                merkle_root=suspended_root,
+                canonical_payload_hash=hashlib.sha256(payload_bytes).hexdigest(),
+                salts=salts,
+                status=CredentialStatus.ACTIVE.value,
+                version=1,
+                created_at=datetime(2024, 6, 1),
+            )
+            db.add(suspended_credential)
+            await db.commit()
+            BlockchainLedgerSimulator.anchor_credential(str(suspended_event.id), suspended_root, str(suspended.id))
+
+        # 5. Seed a visible cohort queue for the one-call finalize endpoint.
+        for index in range(1, 11):
+            student_id = uuid.uuid5(uuid.UUID("b3333333-3333-3333-3333-333333333333"), str(index))
+            event_id = uuid.uuid5(uuid.UUID("c3333333-3333-3333-3333-333333333333"), str(index))
+            if not await db.get(Student, student_id):
+                cohort_student = Student(
+                    id=student_id,
+                    name=f"Cohort Student {index:02d}",
+                    email=f"cohort.student{index:02d}@example.com",
+                    matriculation_no=f"MAT-2026-{index:03d}",
+                    wallet_address=f"0x{index:040d}",
+                )
+                db.add(cohort_student)
+                db.add(AcademicEvent(
+                    id=event_id,
+                    institution_id=inst.id,
+                    student_id=student_id,
+                    event_type=EventType.SEMESTER_FINAL.value,
+                    payload={"matriculation_no": cohort_student.matriculation_no, "semester": "Semester 2", "gpa": "8.50", "credits": 20},
+                    trust_score=1.0,
+                    status=EventStatus.PENDING.value,
+                    created_at=datetime(2026, 6, 1),
+                ))
+        await db.commit()
+
     print("[SEED] Database seeding complete.")
 
 if __name__ == "__main__":

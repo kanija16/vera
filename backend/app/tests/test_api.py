@@ -193,3 +193,29 @@ def test_cryptographic_academic_trust_flow():
         verify_revoked = response.json()
         assert verify_revoked["status"] == "REVOKED"
         assert verify_revoked["checks"]["On-Chain Credential Status Active"] is False
+
+
+def test_document_request_can_be_issued_into_wallet():
+    with TestClient(app) as client:
+        inst_id = "a1111111-1111-1111-1111-111111111111"
+        student_id = "b1111111-1111-1111-1111-111111111111"
+
+        response = client.post(
+            f"/api/v1/students/{student_id}/document-requests",
+            json={"institution_id": inst_id, "request_type": "TRANSCRIPT", "purpose": "Graduate admissions"},
+        )
+        assert response.status_code == 201
+        request_id = response.json()["id"]
+
+        response = client.post(
+            f"/api/v1/institutions/{inst_id}/document-requests/{request_id}/status",
+            json={"status": "APPROVED", "response_notes": "Records reviewed."},
+        )
+        assert response.status_code == 200
+
+        response = client.post(f"/api/v1/institutions/{inst_id}/document-requests/{request_id}/issue", json={})
+        assert response.status_code == 200
+        assert response.json()["status"] == "ACTIVE"
+
+        requests = client.get(f"/api/v1/students/{student_id}/document-requests").json()
+        assert next(item for item in requests if item["id"] == request_id)["status"] == "ISSUED"

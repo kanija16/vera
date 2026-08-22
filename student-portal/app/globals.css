@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f7f7f5;
+  --foreground: #14213d;
+  --vera-surface: #ffffff;
+  --vera-accent: #0f766e;
+  --vera-muted: #64748b;
+  --vera-border: #e2e8f0;
 }
 
 @theme inline {
@@ -22,5 +26,28 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), sans-serif;
 }
+
+.vera-header { position: sticky; top: 0; z-index: 20; background: rgba(255,255,255,.9); border-bottom: 1px solid var(--vera-border); backdrop-filter: blur(16px); }
+.vera-header-inner { max-width: 1280px; min-height: 72px; margin: auto; padding: 0 28px; display: flex; align-items: center; gap: 28px; }
+.vera-brand { display: flex; align-items: center; gap: 11px; color: #14213d; text-decoration: none; min-width: 190px; }
+.vera-brand > span:last-child { display: grid; gap: 2px; }
+.vera-brand strong { font-size: 17px; letter-spacing: .08em; }
+.vera-brand small { color: var(--vera-muted); font-size: 11px; }
+.vera-mark { display: grid; place-items: center; width: 38px; height: 38px; color: white; background: #14213d; border-radius: 12px; }
+.vera-nav { display: flex; gap: 5px; flex: 1; }
+.vera-nav a { padding: 9px 12px; border-radius: 9px; color: #64748b; font-size: 12px; font-weight: 700; text-decoration: none; }
+.vera-nav a:hover, .vera-nav a[aria-current="page"] { color: #14213d; background: #f1f5f9; }
+.vera-header-actions { display: flex; align-items: center; gap: 7px; }
+.vera-header-actions button { display: grid; place-items: center; width: 34px; height: 34px; color: #64748b; background: transparent; border: 0; border-radius: 9px; cursor: pointer; }
+.vera-header-actions button:hover { background: #f1f5f9; color: #14213d; }
+.vera-portal-tag { padding: 7px 10px; border: 1px solid #99f6e4; border-radius: 999px; color: #0f766e; background: #f0fdfa; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+.vera-stat { padding: 18px; background: white; border: 1px solid var(--vera-border); border-radius: 16px; box-shadow: 0 8px 24px rgba(20,33,61,.05); }
+.vera-stat span, .vera-stat small { display: block; color: var(--vera-muted); font-size: 11px; font-weight: 700; }
+.vera-stat strong { display: block; margin-top: 7px; color: #14213d; font-size: 28px; line-height: 1; }
+.vera-stat-success strong { color: #059669; }.vera-stat-warning strong { color: #d97706; }.vera-stat-danger strong { color: #dc2626; }
+.vera-empty { padding: 38px 22px; text-align: center; background: rgba(255,255,255,.75); border: 1px dashed #cbd5e1; border-radius: 16px; }
+.vera-empty-icon { display: grid; place-items: center; width: 44px; height: 44px; margin: 0 auto 12px; color: #0f766e; background: #f0fdfa; border-radius: 12px; }
+.vera-empty strong { color: #14213d; font-size: 14px; }.vera-empty p { max-width: 320px; margin: 7px auto 0; color: #64748b; font-size: 12px; line-height: 1.5; }
+@media (max-width: 760px) { .vera-header-inner { padding: 0 16px; gap: 12px; flex-wrap: wrap; padding-block: 12px; }.vera-nav { order: 3; width: 100%; overflow-x: auto; }.vera-nav a { white-space: nowrap; }.vera-brand { min-width: 0; flex: 1; } .vera-portal-tag { display: none; } }

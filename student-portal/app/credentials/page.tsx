@@ -249,7 +249,7 @@ export default function CredentialsPortfolio() {
                     {/* Blockchain Tx Hash */}
                     <div className="space-y-1.5 text-xs">
                       <div className="flex justify-between items-center">
-                        <span className="text-slate-500 font-mono">Simulated Smart Contract Anchoring Transaction</span>
+                        <span className="text-slate-500 font-mono">Simulated Ledger Receipt</span>
                         <button
                           onClick={() => copyToClipboard(selectedCred.onchain_tx_hash || "Not anchored yet", "tx")}
                           className="text-[10px] text-indigo-400 hover:text-indigo-300 font-mono font-semibold"

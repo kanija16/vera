@@ -29,7 +29,8 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@db:5432/vera
-      - SECRET_KEY=vera_cryptographic_secret_key_2026
+      - ENV=production
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY before starting Docker Compose}
       - DB_FORCE_BOOTSTRAP=true
     depends_on:
       db:

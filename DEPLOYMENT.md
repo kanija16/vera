@@ -1,3 +1,11 @@
+# VERA Deployment Notes
+
+The demo uses SQLite and an in-memory simulated ledger. The simulated ledger implements the same anchor, status, and revocation interface as the deployable contract in [contracts/AcademicRegistry.sol](contracts/AcademicRegistry.sol); it does not claim to submit Polygon transactions.
+
+For production, set `DATABASE_URL` to PostgreSQL. The existing SQLAlchemy layer supports PostgreSQL through the same environment variable, so this is a deployment configuration change rather than a frontend rewrite. Cohort anchoring commits one Merkle batch root per cohort, keeping chain transactions and gas costs bounded as enrollment grows.
+
+Set a unique runtime `SECRET_KEY` before starting the backend. Do not commit `.env` files or default secrets.
+
 # VERA: Deployment & Running Instructions
 
 This file guides the team on running **VERA - Academic Trust Infrastructure** locally during the hackathon.

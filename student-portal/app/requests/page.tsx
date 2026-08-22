@@ -165,7 +165,7 @@ export default function DocumentRequestsPage() {
                 </div>
                 
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Request academic credentials directly from registrar databases. Approved documents are automatically anchored on-chain and delivered to your wallet portfolio.
+                  Request academic credentials directly from registrar databases. Approved documents are issued through institutional governance and added to your wallet portfolio.
                 </p>
 
                 <form onSubmit={handleRequestSubmit} className="space-y-4 pt-2">

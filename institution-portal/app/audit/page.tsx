@@ -95,9 +95,10 @@ export default function InstitutionAuditPage() {
                         </span>
                       </div>
                       {log.details && (
-                        <p className="text-[10px] text-slate-500 leading-relaxed max-w-xl">
-                          Details: {JSON.stringify(log.details)}
-                        </p>
+                        <details className="text-[10px] text-slate-500 leading-relaxed max-w-xl">
+                          <summary className="cursor-pointer font-semibold text-slate-600">View technical details</summary>
+                          <p className="mt-1">{JSON.stringify(log.details)}</p>
+                        </details>
                       )}
                     </div>
 

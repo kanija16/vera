@@ -141,7 +141,7 @@ export default function VerificationResult() {
             </div>
             <div>
               <h2 className="text-2xl font-black text-red-700 tracking-tight">&bull; CREDENTIAL REVOKED &bull;</h2>
-              <p className="text-xs text-slate-500 font-mono mt-1">Credential marked inactive on simulated smart contract ledger.</p>
+              <p className="text-xs text-slate-500 font-mono mt-1">Credential marked inactive in the simulated ledger.</p>
             </div>
           </div>
         );
@@ -205,6 +205,11 @@ export default function VerificationResult() {
               <div className="bg-amber-50 border border-amber-200 p-4.5 rounded-2xl text-xs text-amber-700 space-y-1.5">
                 <span className="font-bold flex items-center gap-1.5"><AlertTriangle className="h-4 w-4 shrink-0" /> Timeline inconsistency flag</span>
                 <p className="text-slate-500 leading-relaxed text-[11px] font-semibold">{verifyData.consistency_errors[0]}</p>
+                {verifyData.ai_explanation && (
+                  <p className="border-t border-amber-200 pt-2 text-slate-600 leading-relaxed text-[11px]">
+                    <strong>AI Explanation (not a trust determination):</strong> {verifyData.ai_explanation}
+                  </p>
+                )}
               </div>
             )}
 
@@ -302,13 +307,13 @@ export default function VerificationResult() {
                 {showTechnicalProof && (
                   <div className="p-6 border-t border-slate-200 bg-slate-900 text-slate-200 font-mono text-xs space-y-5">
                     <div>
-                      <span className="text-[9px] text-slate-500 uppercase block mb-1 font-bold">Anchored Merkle Root (Polygon)</span>
+                      <span className="text-[9px] text-slate-500 uppercase block mb-1 font-bold">Anchored Merkle Root (simulated ledger)</span>
                       <code className="block bg-slate-950 border border-white/5 p-3 rounded-xl overflow-x-auto text-emerald-400 select-all">
                         0x{verifyData.merkle_root}
                       </code>
                     </div>
                     <div>
-                      <span className="text-[9px] text-slate-500 uppercase block mb-1 font-bold">Smart Contract Anchoring Tx</span>
+                      <span className="text-[9px] text-slate-500 uppercase block mb-1 font-bold">Ledger receipt reference</span>
                       <code className="block bg-slate-950 border border-white/5 p-3 rounded-xl overflow-x-auto text-purple-400 select-all">
                         {verifyData.onchain_tx_hash || "Simulated Local Anchored"}
                       </code>

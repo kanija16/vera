@@ -48,6 +48,16 @@ export default function InstitutionRequestsPage() {
     }
   };
 
+  const handleIssue = async (request: DocumentRequest) => {
+    try {
+      await api.issueDocumentRequest(selectedInst.id, request.id);
+      alert("Approved request issued and anchored in the simulated ledger.");
+      await loadRequests();
+    } catch (err: any) {
+      alert(err.message || "VERA could not issue this approved document request.");
+    }
+  };
+
   const getStatusChip = (status: string) => {
     switch (status) {
       case "SUBMITTED":
@@ -167,7 +177,17 @@ export default function InstitutionRequestsPage() {
                   )}
                 </div>
 
-                {req.status !== "ISSUED" && req.status !== "REJECTED" && (
+                {req.status === "APPROVED" && (
+                  <div className="pt-4 border-t border-slate-100 flex justify-end">
+                    <button
+                      onClick={() => handleIssue(req)}
+                      className="bg-[#0F766E] text-white hover:bg-[#115E59] px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+                    >
+                      Issue Credential
+                    </button>
+                  </div>
+                )}
+                {req.status !== "ISSUED" && req.status !== "REJECTED" && req.status !== "APPROVED" && (
                   <div className="pt-4 border-t border-slate-100 flex justify-end gap-3">
                     <button
                       onClick={() => {

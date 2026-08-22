@@ -9,7 +9,7 @@ from typing import List, Tuple, Dict, Any
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives import hashes, serialization
 
-SECRET_KEY = os.getenv("SECRET_KEY", "vera_cryptographic_secret_key_2026")
+SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
 
 # 1. Canonicalization
 def canonicalize_json(payload: Dict[str, Any]) -> bytes:

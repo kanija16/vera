@@ -11,6 +11,7 @@ export default function InstitutionIssuancePage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [events, setEvents] = useState<AcademicEvent[]>([]);
   const [issuedCreds, setIssuedCreds] = useState<Credential[]>([]);
+  const [selectedEventIds, setSelectedEventIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Officers (seeded in DB)
@@ -100,10 +101,22 @@ export default function InstitutionIssuancePage() {
   const handleFinalize = async (eventId: string) => {
     try {
       await api.finalizeEvent(selectedInst.id, eventId);
-      alert("Governance signed! Credential issued and batched onto simulated blockchain ledger.");
+      alert("Governance signed! Credential issued and added to the simulated ledger batch.");
       loadIssuanceData();
     } catch (err: any) {
       alert(err.message || "Failed to finalize event.");
+    }
+  };
+
+  const handleFinalizeCohort = async () => {
+    if (selectedEventIds.length === 0) return;
+    try {
+      const result = await api.finalizeCohort(selectedInst.id, selectedEventIds);
+      alert(`${result.finalized_count} credentials issued and anchored in one simulated ledger batch.`);
+      setSelectedEventIds([]);
+      loadIssuanceData();
+    } catch (err: any) {
+      alert(err.message || "Failed to finalize cohort.");
     }
   };
 
@@ -151,7 +164,7 @@ export default function InstitutionIssuancePage() {
     setRevoking(true);
     try {
       await api.revokeOnChain(revokingCredId);
-      alert("Credential marked as REVOKED on the simulated blockchain ledger registry.");
+      alert("Credential marked as REVOKED in the simulated ledger registry.");
       setRevokingCredId(null);
       setRevokeReason("");
       loadIssuanceData();
@@ -204,10 +217,11 @@ export default function InstitutionIssuancePage() {
           </div>
 
           <button
-            onClick={handleAnchorBatch}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-md shadow-indigo-600/10 cursor-pointer"
+            onClick={handleFinalizeCohort}
+            disabled={selectedEventIds.length === 0}
+            className="bg-[#0F766E] hover:bg-[#115E59] disabled:bg-slate-300 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition-colors flex items-center gap-1.5 shadow-md cursor-pointer disabled:cursor-not-allowed"
           >
-            <Layers className="h-4 w-4" /> Anchor Queued Batch Root
+            <Layers className="h-4 w-4" /> Finalize & Anchor Cohort ({selectedEventIds.length})
           </button>
         </div>
 
@@ -254,9 +268,9 @@ export default function InstitutionIssuancePage() {
                       onChange={(e) => setEventType(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-slate-500/20 font-bold cursor-pointer"
                     >
-                      <option value="SEMESTER_FINAL">Semester Grades (SEMESTER_FINAL)</option>
-                      <option value="DEGREE_AWARD">Graduation Convocation (DEGREE_AWARD)</option>
-                      <option value="MIGRATION_REQ">Migration Certificate (MIGRATION_REQ)</option>
+                      <option value="SEMESTER_FINAL">Semester Academic Record</option>
+                      <option value="DEGREE_AWARD">Degree Certificate</option>
+                      <option value="MIGRATION_REQ">Migration Certificate</option>
                     </select>
                   </div>
 
@@ -299,15 +313,23 @@ export default function InstitutionIssuancePage() {
                       <div key={ev.event_id} className="py-4.5 flex flex-col md:flex-row md:items-center justify-between gap-4 first:pt-0 last:pb-0 text-xs">
                         <div className="space-y-1.5">
                           <div className="flex items-center gap-2">
+                            {ev.status !== "ISSUED" && ev.status !== "REJECTED" && (
+                              <input
+                                type="checkbox"
+                                checked={selectedEventIds.includes(ev.event_id)}
+                                onChange={() => setSelectedEventIds((current) => current.includes(ev.event_id) ? current.filter((id) => id !== ev.event_id) : [...current, ev.event_id])}
+                                aria-label={`Select ${ev.student_name} event`}
+                              />
+                            )}
                             <span className="text-[9px] font-bold font-mono uppercase bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded border border-indigo-150">
                               {ev.event_type}
                             </span>
                             <h4 className="font-bold text-slate-900">{ev.student_name}</h4>
                             <span className="text-[9px] text-slate-400 font-mono">{ev.status}</span>
                           </div>
-                          <code className="block bg-slate-50 border border-slate-150 rounded-xl p-2.5 font-mono text-[10px] text-slate-500 leading-normal max-w-lg">
-                            {JSON.stringify(ev.payload)}
-                          </code>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 bg-slate-50 border border-slate-150 rounded-xl p-2.5 text-[10px] text-slate-500 leading-normal max-w-lg">
+                            {Object.entries(ev.payload || {}).slice(0, 5).map(([key, value]) => <span key={key}><strong className="font-semibold text-slate-400">{formatCredentialType(key)}:</strong> {String(value)}</span>)}
+                          </div>
                           {ev.status === "SUSPICIOUS_REVIEW" && (
                             <span className="flex items-center gap-1 text-[10px] text-amber-600 font-semibold bg-amber-50 px-2 py-0.5 rounded border border-amber-200 w-fit">
                               <AlertTriangle className="h-3.5 w-3.5" /> Timeline Warning: Anomalous chronological date detected!
@@ -356,7 +378,7 @@ export default function InstitutionIssuancePage() {
                 </div>
 
                 {issuedCreds.length === 0 ? (
-                  <p className="text-xs text-slate-400 text-center py-6">No credentials issued on-chain yet.</p>
+                  <p className="text-xs text-slate-400 text-center py-6">No credentials issued into the simulated ledger yet.</p>
                 ) : (
                   <div className="divide-y divide-slate-100 text-xs">
                     {issuedCreds.map((c) => (
@@ -375,7 +397,7 @@ export default function InstitutionIssuancePage() {
                           </div>
                           <p className="text-[10px] text-slate-500 font-mono mt-1 leading-normal">
                                     Root: {truncateHash(c.merkle_root, 24)} <br className="md:hidden" />
-                            Tx: {c.onchain_tx_hash ? c.onchain_tx_hash.substring(0, 18) + "..." : "Simulated Local Anchored"}
+                            Tx: {c.onchain_tx_hash ? truncateHash(c.onchain_tx_hash, 18) : "Pending local anchoring"}
                           </p>
                         </div>
 
@@ -411,7 +433,7 @@ export default function InstitutionIssuancePage() {
             </button>
             <h3 className="text-md font-bold text-slate-900">Revoke Verification Status</h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              This action writes an invalidation status to the smart contract ledger. Verifiers will instantly reject this credential on validation.
+              This action writes an invalidation status to the simulated ledger. Verifiers will instantly reject this credential on validation.
             </p>
 
             <div className="space-y-1">

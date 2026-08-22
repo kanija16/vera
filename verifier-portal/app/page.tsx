@@ -46,7 +46,7 @@ export default function VerifierLanding() {
             <span className="text-purple-600">cryptographic validation.</span>
           </h2>
           <p className="text-sm text-slate-500 leading-relaxed">
-            VERA completely bypasses standard PDF validator uploads. By checking digital signatures against distributed smart contracts, VERA guarantees record authenticity even if the issuing university's own database is offline.
+            VERA bypasses standard PDF validator uploads by checking digital signatures and institutional commitments. This demo uses a simulated ledger with deployable contract semantics, so the verification story remains inspectable offline.
           </p>
 
           <div className="space-y-4 border-t border-slate-200/80 pt-6">
@@ -87,7 +87,7 @@ export default function VerifierLanding() {
                   type="text"
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
-                  placeholder="e.g. mock_pass_abcdef..."
+                  placeholder="Paste a VERA pass token or verification URL"
                   className="w-full bg-slate-50 border border-slate-200 text-xs text-slate-700 rounded-xl p-3 focus:outline-none focus:ring-2 focus:ring-purple-500/20 font-mono"
                   required
                 />
@@ -108,7 +108,7 @@ export default function VerifierLanding() {
 
       {/* Footer */}
       <footer className="border-t border-slate-200 py-6 text-center text-xs text-slate-400 font-mono bg-white">
-        Academic Trust Registry anchored on Polygon Public Smart Contracts.
+        Academic Trust Registry with a deployable contract interface and a simulated local ledger for this demo.
       </footer>
     </div>
   );
