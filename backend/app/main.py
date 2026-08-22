@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from app.database import engine, get_db, AsyncSessionLocal, bootstrap_database
-from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch
-from app.schemas import EventCreate, EventResponse, FinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse
+from app.models import Base, Institution, Student, AcademicEvent, Credential, Permission, AuditLog, EventType, EventStatus, CredentialStatus, InstitutionOfficer, CredentialAuthorization, AnchorBatch, DocumentRequest, VerificationRequest, IntegrityRequest, Notification
+from app.schemas import EventCreate, EventResponse, FinalizeResponse, StudentCredentialsResponse, CredentialResponseItem, ShareRequest, ShareResponse, VerifyResponse, TamperSimulateRequest, RevokeResponse, ProposeRequest, ProposeResponse, ApproveRequest, ApproveResponse, BatchAnchorResponse, StudentInfoSchema, DocumentRequestCreate, DocumentRequestResponse, VerificationRequestCreate, VerificationRequestResponse, IntegrityRequestCreate, IntegrityRequestResponse, NotificationResponse
 from app.services.crypto import build_merkle_tree, generate_hmac_token, verify_hmac_token, verify_merkle_proof, canonicalize_json, generate_merkle_proof, sign_message_ecdsa, verify_signature_ecdsa
 from app.services.validator import ConsistencyAnomalyEngine
 from app.services.blockchain import BlockchainLedgerSimulator, blockchain_service
@@ -540,21 +540,42 @@ async def finalize_event(inst_id: uuid.UUID, event_id: uuid.UUID, db: AsyncSessi
 # 6. GET /api/v1/students/{student_id}/credentials -> List student credentials
 @app.get("/api/v1/students/{student_id}/credentials", response_model=StudentCredentialsResponse)
 async def list_student_credentials(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.orm import selectinload
     stud_stmt = select(Student).filter(Student.id == student_id)
     stud_res = await db.execute(stud_stmt)
     student = stud_res.scalar_one_or_none()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
         
-    creds_stmt = select(Credential).filter(Credential.student_id == student_id)
+    creds_stmt = select(Credential).filter(Credential.student_id == student_id).options(
+        selectinload(Credential.source_event),
+        selectinload(Credential.batch)
+    )
     creds_res = await db.execute(creds_stmt)
     credentials = list(creds_res.scalars().all())
     
-    return StudentCredentialsResponse(
-        student_id=student.id,
+    student_info = StudentInfoSchema(
+        id=student.id,
         name=student.name,
+        email=student.email,
         matriculation_no=student.matriculation_no,
-        credentials=[
+        wallet_address=student.wallet_address
+    )
+    
+    response_items = []
+    for c in credentials:
+        cred_type = c.source_event.event_type if c.source_event else "Unknown"
+        payload_fields = c.source_event.payload if c.source_event else {}
+        
+        # Determine transaction hash
+        tx_hash = c.batch.tx_hash if c.batch else None
+        if not tx_hash:
+            # Fallback to simulated blockchain ledger status if not batched but exists there
+            onchain_info = BlockchainLedgerSimulator.get_credential(str(c.id))
+            if onchain_info:
+                tx_hash = onchain_info.get("tx_hash")
+                
+        response_items.append(
             CredentialResponseItem(
                 id=c.id,
                 event_id=c.event_id,
@@ -562,10 +583,21 @@ async def list_student_credentials(student_id: uuid.UUID, db: AsyncSession = Dep
                 canonical_payload_hash=c.canonical_payload_hash,
                 status=c.status,
                 version=c.version,
-                created_at=c.created_at
-            ) for c in credentials
-        ]
+                created_at=c.created_at,
+                credential_type=cred_type,
+                fields=payload_fields,
+                onchain_tx_hash=tx_hash
+            )
+        )
+        
+    return StudentCredentialsResponse(
+        student_id=student.id,
+        name=student.name,
+        matriculation_no=student.matriculation_no,
+        student=student_info,
+        credentials=response_items
     )
+
 
 
 # 7. POST /api/v1/credentials/{cred_id}/share -> Create permission token with selective disclosure list
@@ -807,11 +839,15 @@ async def verify_credential_pass(access_token: str, db: AsyncSession = Depends(g
         matriculation_no=student.matriculation_no,
         issuer_name=inst.name,
         issuer_code=inst.code,
+        institution_name=inst.name,
         credential_id=credential.id,
         event_type=event.event_type,
+        credential_type=event.event_type,
         payload=disclosed_payload,
+        disclosed_fields=disclosed_payload,
         merkle_root=onchain["merkle_root"],
         onchain_status=onchain_status,
+        onchain_tx_hash=onchain.get("tx_hash"),
         checks=checks,
         layered_checks=layered_checks,
         consistency_errors=consistency_errors,
@@ -832,8 +868,12 @@ async def _simulate_tamper_helper(req: TamperSimulateRequest, db: AsyncSession):
     event_res = await db.execute(event_stmt)
     event = event_res.scalar_one_or_none()
     
+    field_name = req.field_name or req.field_to_tamper
+    if not field_name:
+        raise HTTPException(status_code=400, detail="field_name or field_to_tamper is required")
+        
     updated_payload = dict(event.payload)
-    updated_payload[req.field_name] = req.new_value
+    updated_payload[field_name] = req.new_value
     event.payload = updated_payload
     await db.commit()
     
@@ -842,10 +882,10 @@ async def _simulate_tamper_helper(req: TamperSimulateRequest, db: AsyncSession):
         actor_id="SIMULATED_MALICIOUS_DBA",
         action="TAMPER_OFF_CHAIN_RECORD",
         target_id=str(req.credential_id),
-        details={"field": req.field_name, "value": req.new_value}
+        details={"field": field_name, "value": req.new_value}
     )
     
-    return {"message": f"Off-chain event payload successfully tampered: set '{req.field_name}' to '{req.new_value}'."}
+    return {"message": f"Off-chain event payload successfully tampered: set '{field_name}' to '{req.new_value}'."}
 
 
 # 10a. POST /api/v1/demo/tamper -> Modify off-chain field directly
@@ -913,3 +953,411 @@ async def revoke_credential(cred_id: uuid.UUID, db: AsyncSession = Depends(get_d
         status="REVOKED",
         message="Credential revoked successfully on-chain."
     )
+
+
+# 13. GET /api/v1/students/{student_id}/access-history -> Verification history logs
+@app.get("/api/v1/students/{student_id}/access-history")
+async def get_student_access_history(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    c_stmt = select(Credential).filter(Credential.student_id == student_id)
+    c_res = await db.execute(c_stmt)
+    creds = c_res.scalars().all()
+    cred_ids = [str(c.id) for c in creds]
+    
+    logs = []
+    if cred_ids:
+        log_stmt = select(AuditLog).filter(
+            AuditLog.target_id.in_(cred_ids),
+            AuditLog.action == "VERIFY_CREDENTIAL_TOKEN"
+        ).order_by(AuditLog.timestamp.desc())
+        log_res = await db.execute(log_stmt)
+        audit_logs = log_res.scalars().all()
+        
+        cred_map = {str(c.id): c for c in creds}
+        
+        for al in audit_logs:
+            c = cred_map.get(al.target_id)
+            c_type = "transcript"
+            if c:
+                ev_stmt = select(AcademicEvent).filter(AcademicEvent.id == c.event_id)
+                ev_res = await db.execute(ev_stmt)
+                ev = ev_res.scalar_one_or_none()
+                if ev:
+                    c_type = ev.event_type
+                    
+            logs.append({
+                "event_time": al.timestamp,
+                "verifier_label": al.actor_id,
+                "credential_type": c_type,
+                "disclosed_fields_count": len(al.details.get("checks", {})) if al.details else 3,
+                "result": al.details.get("result", "verified").lower() if al.details else "verified",
+                "permission_id": None
+            })
+    return {"access_logs": logs}
+
+
+# 14. GET /api/v1/institutions/{inst_id}/audit-trail -> Institutional audit trail logs
+@app.get("/api/v1/institutions/{inst_id}/audit-trail")
+async def get_institution_audit_trail(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    inst_stmt = select(Institution).filter(Institution.id == inst_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if not inst:
+        raise HTTPException(status_code=404, detail="Institution not found")
+        
+    off_stmt = select(InstitutionOfficer).filter(InstitutionOfficer.institution_id == inst_id)
+    off_res = await db.execute(off_stmt)
+    officers = off_res.scalars().all()
+    actor_ids = [inst.code] + [o.name for o in officers]
+    
+    stmt = select(AuditLog).filter(AuditLog.actor_id.in_(actor_ids)).order_by(AuditLog.timestamp.desc())
+    res = await db.execute(stmt)
+    audit_logs = res.scalars().all()
+    
+    return {
+        "audit_logs": [
+            {
+                "id": l.id,
+                "time": l.timestamp,
+                "actor": l.actor_id,
+                "action": l.action,
+                "details": l.details
+            } for l in audit_logs
+        ]
+    }
+
+
+# 15. GET /api/v1/institutions/{inst_id}/events -> Logged academic events list for registrar console
+@app.get("/api/v1/institutions/{inst_id}/events")
+async def list_institution_events(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    from sqlalchemy.orm import selectinload
+    stmt = select(AcademicEvent).filter(AcademicEvent.institution_id == inst_id).options(
+        selectinload(AcademicEvent.student)
+    ).order_by(AcademicEvent.created_at.desc())
+    res = await db.execute(stmt)
+    events = res.scalars().all()
+    return [
+        {
+            "event_id": e.id,
+            "student_name": e.student.name if e.student else "Unknown",
+            "student_id": e.student_id,
+            "event_type": e.event_type,
+            "event_date": e.created_at,
+            "payload": e.payload,
+            "status": e.status,
+            "trust_score": e.trust_score
+        } for e in events
+    ]
+
+
+# 16. POST /api/v1/students/{student_id}/document-requests -> Create new document request
+@app.post("/api/v1/students/{student_id}/document-requests", response_model=DocumentRequestResponse, status_code=201)
+async def create_document_request(student_id: uuid.UUID, req: DocumentRequestCreate, db: AsyncSession = Depends(get_db)):
+    stud_stmt = select(Student).filter(Student.id == student_id)
+    stud_res = await db.execute(stud_stmt)
+    student = stud_res.scalar_one_or_none()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+        
+    new_req = DocumentRequest(
+        student_id=student_id,
+        institution_id=req.institution_id,
+        request_type=req.request_type,
+        purpose=req.purpose,
+        details=req.details,
+        status="SUBMITTED"
+    )
+    db.add(new_req)
+    await db.commit()
+    await db.refresh(new_req)
+    
+    await log_audit_async(
+        db,
+        actor_id=student.name,
+        action="CREATE_DOCUMENT_REQUEST",
+        target_id=str(new_req.id),
+        details={"type": req.request_type}
+    )
+    
+    inst_stmt = select(Institution).filter(Institution.id == req.institution_id)
+    inst_res = await db.execute(inst_stmt)
+    inst = inst_res.scalar_one_or_none()
+    if inst:
+        notif = Notification(
+            user_id=inst.code,
+            title="New Document Request",
+            message=f"Student {student.name} requested a {req.request_type}."
+        )
+        db.add(notif)
+        await db.commit()
+        
+    return new_req
+
+
+# 17. GET /api/v1/students/{student_id}/document-requests -> Get all document requests for student
+@app.get("/api/v1/students/{student_id}/document-requests", response_model=List[DocumentRequestResponse])
+async def list_student_document_requests(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(DocumentRequest).filter(DocumentRequest.student_id == student_id).order_by(DocumentRequest.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 18. GET /api/v1/institutions/{inst_id}/document-requests -> Get all document requests for institution
+@app.get("/api/v1/institutions/{inst_id}/document-requests", response_model=List[DocumentRequestResponse])
+async def list_institution_document_requests(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(DocumentRequest).filter(DocumentRequest.institution_id == inst_id).order_by(DocumentRequest.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 19. POST /api/v1/institutions/{inst_id}/document-requests/{req_id}/status -> Update status of a request
+@app.post("/api/v1/institutions/{inst_id}/document-requests/{req_id}/status", response_model=DocumentRequestResponse)
+async def update_document_request_status(inst_id: uuid.UUID, req_id: uuid.UUID, payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    req_stmt = select(DocumentRequest).filter(DocumentRequest.id == req_id, DocumentRequest.institution_id == inst_id)
+    req_res = await db.execute(req_stmt)
+    doc_req = req_res.scalar_one_or_none()
+    if not doc_req:
+        raise HTTPException(status_code=404, detail="Document request not found")
+        
+    status_val = payload.get("status")
+    response_notes = payload.get("response_notes")
+    
+    if status_val:
+        doc_req.status = status_val
+    if response_notes is not None:
+        doc_req.response_notes = response_notes
+        
+    doc_req.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(doc_req)
+    
+    stud_stmt = select(Student).filter(Student.id == doc_req.student_id)
+    stud_res = await db.execute(stud_stmt)
+    student = stud_res.scalar_one_or_none()
+    if student:
+        notif = Notification(
+            user_id=str(student.id),
+            title="Document Request Update",
+            message=f"Your {doc_req.request_type} request is now {doc_req.status}."
+        )
+        db.add(notif)
+        await db.commit()
+        
+    return doc_req
+
+
+# 20. POST /api/v1/verify/verification-requests -> Create new verifier verification request
+@app.post("/api/v1/verify/verification-requests", response_model=VerificationRequestResponse, status_code=201)
+async def create_verification_request(req: VerificationRequestCreate, db: AsyncSession = Depends(get_db)):
+    new_req = VerificationRequest(
+        verifier_org=req.verifier_org,
+        verifier_email=req.verifier_email,
+        student_id=req.student_id,
+        credential_id=req.credential_id,
+        details=req.details,
+        status="PENDING"
+    )
+    db.add(new_req)
+    await db.commit()
+    await db.refresh(new_req)
+    
+    cred_stmt = select(Credential).filter(Credential.id == req.credential_id)
+    cred_res = await db.execute(cred_stmt)
+    cred = cred_res.scalar_one_or_none()
+    if cred:
+        ev_stmt = select(AcademicEvent).filter(AcademicEvent.id == cred.event_id)
+        ev_res = await db.execute(ev_stmt)
+        ev = ev_res.scalar_one_or_none()
+        if ev:
+            inst_stmt = select(Institution).filter(Institution.id == ev.institution_id)
+            inst_res = await db.execute(inst_stmt)
+            inst = inst_res.scalar_one_or_none()
+            if inst:
+                notif = Notification(
+                    user_id=inst.code,
+                    title="Manual Verification Request",
+                    message=f"{req.verifier_org} requested confirmation for credential {req.credential_id}."
+                )
+                db.add(notif)
+                await db.commit()
+                
+    return new_req
+
+
+# 21. GET /api/v1/institutions/{inst_id}/verification-requests -> Get all verification requests for institution
+@app.get("/api/v1/institutions/{inst_id}/verification-requests", response_model=List[VerificationRequestResponse])
+async def list_institution_verification_requests(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(VerificationRequest).join(
+        Credential, VerificationRequest.credential_id == Credential.id
+    ).join(
+        AcademicEvent, Credential.event_id == AcademicEvent.id
+    ).filter(
+        AcademicEvent.institution_id == inst_id
+    ).order_by(VerificationRequest.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 22. POST /api/v1/institutions/{inst_id}/verification-requests/{req_id}/status -> Respond to verification request
+@app.post("/api/v1/institutions/{inst_id}/verification-requests/{req_id}/status", response_model=VerificationRequestResponse)
+async def update_verification_request_status(inst_id: uuid.UUID, req_id: uuid.UUID, payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    req_stmt = select(VerificationRequest).filter(VerificationRequest.id == req_id)
+    req_res = await db.execute(req_stmt)
+    v_req = req_res.scalar_one_or_none()
+    if not v_req:
+        raise HTTPException(status_code=404, detail="Verification request not found")
+        
+    status_val = payload.get("status")
+    response_notes = payload.get("response_notes")
+    if status_val:
+        v_req.status = status_val
+    if response_notes is not None:
+        v_req.response_notes = response_notes
+        
+    await db.commit()
+    await db.refresh(v_req)
+    return v_req
+
+
+# 23. GET /api/v1/verify/verification-requests/{req_id} -> Get verification request by ID
+@app.get("/api/v1/verify/verification-requests/{req_id}", response_model=VerificationRequestResponse)
+async def get_verification_request(req_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(VerificationRequest).filter(VerificationRequest.id == req_id)
+    res = await db.execute(stmt)
+    v_req = res.scalar_one_or_none()
+    if not v_req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return v_req
+
+
+# 24. POST /api/v1/verify/integrity-requests -> Create plagiarism / integrity review request
+@app.post("/api/v1/verify/integrity-requests", response_model=IntegrityRequestResponse, status_code=201)
+async def create_integrity_request(req: IntegrityRequestCreate, db: AsyncSession = Depends(get_db)):
+    new_req = IntegrityRequest(
+        verifier_org=req.verifier_org,
+        verifier_email=req.verifier_email,
+        credential_id=req.credential_id,
+        academic_work_details=req.academic_work_details,
+        concern=req.concern,
+        status="PENDING"
+    )
+    db.add(new_req)
+    await db.commit()
+    await db.refresh(new_req)
+    
+    cred_stmt = select(Credential).filter(Credential.id == req.credential_id)
+    cred_res = await db.execute(cred_stmt)
+    cred = cred_res.scalar_one_or_none()
+    if cred:
+        ev_stmt = select(AcademicEvent).filter(AcademicEvent.id == cred.event_id)
+        ev_res = await db.execute(ev_stmt)
+        ev = ev_res.scalar_one_or_none()
+        if ev:
+            inst_stmt = select(Institution).filter(Institution.id == ev.institution_id)
+            inst_res = await db.execute(inst_stmt)
+            inst = inst_res.scalar_one_or_none()
+            if inst:
+                notif = Notification(
+                    user_id=inst.code,
+                    title="Plagiarism Review Flagged",
+                    message=f"Academic work for credential {req.credential_id} was flagged for plagiarism review."
+                )
+                db.add(notif)
+                await db.commit()
+                
+    return new_req
+
+
+# 25. GET /api/v1/institutions/{inst_id}/integrity-requests -> Get all integrity requests for institution
+@app.get("/api/v1/institutions/{inst_id}/integrity-requests", response_model=List[IntegrityRequestResponse])
+async def list_institution_integrity_requests(inst_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(IntegrityRequest).join(
+        Credential, IntegrityRequest.credential_id == Credential.id
+    ).join(
+        AcademicEvent, Credential.event_id == AcademicEvent.id
+    ).filter(
+        AcademicEvent.institution_id == inst_id
+    ).order_by(IntegrityRequest.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 26. POST /api/v1/institutions/{inst_id}/integrity-requests/{req_id}/status -> Update status of integrity request
+@app.post("/api/v1/institutions/{inst_id}/integrity-requests/{req_id}/status", response_model=IntegrityRequestResponse)
+async def update_integrity_request_status(inst_id: uuid.UUID, req_id: uuid.UUID, payload: Dict[str, Any], db: AsyncSession = Depends(get_db)):
+    req_stmt = select(IntegrityRequest).filter(IntegrityRequest.id == req_id)
+    req_res = await db.execute(req_stmt)
+    i_req = req_res.scalar_one_or_none()
+    if not i_req:
+        raise HTTPException(status_code=404, detail="Integrity request not found")
+        
+    status_val = payload.get("status")
+    response_notes = payload.get("response_notes")
+    if status_val:
+        i_req.status = status_val
+    if response_notes is not None:
+        i_req.response_notes = response_notes
+        
+    await db.commit()
+    await db.refresh(i_req)
+    return i_req
+
+
+# 27. GET /api/v1/verify/integrity-requests/{req_id} -> Get integrity request by ID
+@app.get("/api/v1/verify/integrity-requests/{req_id}", response_model=IntegrityRequestResponse)
+async def get_integrity_request(req_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(IntegrityRequest).filter(IntegrityRequest.id == req_id)
+    res = await db.execute(stmt)
+    i_req = res.scalar_one_or_none()
+    if not i_req:
+        raise HTTPException(status_code=404, detail="Request not found")
+    return i_req
+
+
+# 28. GET /api/v1/students/{student_id}/notifications -> Get student notifications
+@app.get("/api/v1/students/{student_id}/notifications", response_model=List[NotificationResponse])
+async def list_student_notifications(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(Notification).filter(Notification.user_id == str(student_id)).order_by(Notification.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 29. POST /api/v1/students/{student_id}/notifications/read -> Mark student notifications as read
+@app.post("/api/v1/students/{student_id}/notifications/read")
+async def mark_notifications_read(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(Notification).filter(Notification.user_id == str(student_id), Notification.is_read == False)
+    res = await db.execute(stmt)
+    notifs = res.scalars().all()
+    for n in notifs:
+        n.is_read = True
+    await db.commit()
+    return {"message": f"Marked {len(notifs)} notifications as read."}
+
+
+# 30. GET /api/v1/institutions/{code}/notifications -> Get institution notifications by code
+@app.get("/api/v1/institutions/{code}/notifications", response_model=List[NotificationResponse])
+async def list_institution_notifications(code: str, db: AsyncSession = Depends(get_db)):
+    stmt = select(Notification).filter(Notification.user_id == code).order_by(Notification.created_at.desc())
+    res = await db.execute(stmt)
+    return list(res.scalars().all())
+
+
+# 31. GET /api/v1/students/{student_id}/permissions -> Get active student shared permissions
+@app.get("/api/v1/students/{student_id}/permissions")
+async def list_student_permissions(student_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    stmt = select(Permission).filter(Permission.student_id == student_id, Permission.is_revoked == False).order_by(Permission.expires_at.desc())
+    res = await db.execute(stmt)
+    perms = res.scalars().all()
+    return [
+        {
+            "id": p.id,
+            "credential_id": p.credential_id,
+            "student_id": p.student_id,
+            "verifier_email": p.verifier_email,
+            "access_token": p.access_token,
+            "fields_allowed": p.fields_allowed,
+            "expires_at": p.expires_at,
+            "is_revoked": p.is_revoked
+        } for p in perms
+    ]
+
+

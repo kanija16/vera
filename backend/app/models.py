@@ -213,3 +213,58 @@ class AuditLog(Base):
     target_id = Column(String, nullable=True)
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow)
     details = Column(SafeJSONB, nullable=True)
+
+
+class DocumentRequest(Base):
+    __tablename__ = 'document_request'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
+    institution_id = Column(GUID, ForeignKey('institution.id'), nullable=False)
+    request_type = Column(String, nullable=False)  # TRANSCRIPT, MIGRATION_REQ, BONAFIDE_REQ, DEGREE_AWARD
+    purpose = Column(String, nullable=False)
+    details = Column(String, nullable=True)
+    status = Column(String, default="SUBMITTED")  # SUBMITTED | UNDER_REVIEW | APPROVED | REJECTED | PROCESSING | ISSUED
+    response_notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class VerificationRequest(Base):
+    __tablename__ = 'verification_request'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    verifier_org = Column(String, nullable=False)
+    verifier_email = Column(String, nullable=False)
+    student_id = Column(GUID, ForeignKey('student.id'), nullable=False)
+    credential_id = Column(GUID, ForeignKey('credential.id'), nullable=False)
+    details = Column(String, nullable=False)
+    status = Column(String, default="PENDING")  # PENDING | UNDER_REVIEW | CONFIRMED | REJECTED
+    response_notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class IntegrityRequest(Base):
+    __tablename__ = 'integrity_request'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    verifier_org = Column(String, nullable=False)
+    verifier_email = Column(String, nullable=False)
+    credential_id = Column(GUID, ForeignKey('credential.id'), nullable=False)
+    academic_work_details = Column(String, nullable=False)
+    concern = Column(String, nullable=False)
+    status = Column(String, default="PENDING")  # PENDING | UNDER_REVIEW | NO_ISSUE_FOUND | REQUIRES_REVIEW | INCONSISTENCY_DETECTED
+    response_notes = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class Notification(Base):
+    __tablename__ = 'notification'
+    
+    id = Column(GUID, primary_key=True, default=uuid.uuid4)
+    user_id = Column(String, nullable=False)  # Student UUID or Institution code
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+

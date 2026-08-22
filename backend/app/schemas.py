@@ -68,14 +68,25 @@ class CredentialResponseItem(BaseModel):
     status: str
     version: int
     created_at: datetime
+    credential_type: str
+    fields: Dict[str, Any]
+    onchain_tx_hash: Optional[str] = None
 
     class Config:
         from_attributes = True
+
+class StudentInfoSchema(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    matriculation_no: str
+    wallet_address: Optional[str] = None
 
 class StudentCredentialsResponse(BaseModel):
     student_id: UUID
     name: str
     matriculation_no: str
+    student: StudentInfoSchema
     credentials: List[CredentialResponseItem]
 
 # Share permission schemas
@@ -98,21 +109,108 @@ class VerifyResponse(BaseModel):
     matriculation_no: str
     issuer_name: str
     issuer_code: str
+    institution_name: str  # copy of issuer_name for frontend compatibility
     credential_id: UUID
     event_type: str
+    credential_type: str  # copy of event_type for frontend compatibility
     payload: Dict[str, Any]
+    disclosed_fields: Dict[str, Any]  # copy of payload for frontend compatibility
     merkle_root: str
     onchain_status: str
+    onchain_tx_hash: Optional[str] = None
     checks: Dict[str, bool]
     layered_checks: Dict[str, bool]
     consistency_errors: List[str]
     salts: Dict[str, str] = Field(default_factory=dict)
     merkle_proofs: Dict[str, List[Dict[str, str]]] = Field(default_factory=dict)
 
-# Tamper simulation schemas
+
+# Document request schemas
+class DocumentRequestCreate(BaseModel):
+    institution_id: UUID
+    request_type: str
+    purpose: str
+    details: Optional[str] = None
+
+class DocumentRequestResponse(BaseModel):
+    id: UUID
+    student_id: UUID
+    institution_id: UUID
+    request_type: str
+    purpose: str
+    details: Optional[str]
+    status: str
+    response_notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Verification request schemas
+class VerificationRequestCreate(BaseModel):
+    verifier_org: str
+    verifier_email: str
+    student_id: UUID
+    credential_id: UUID
+    details: str
+
+class VerificationRequestResponse(BaseModel):
+    id: UUID
+    verifier_org: str
+    verifier_email: str
+    student_id: UUID
+    credential_id: UUID
+    details: str
+    status: str
+    response_notes: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Integrity request schemas
+class IntegrityRequestCreate(BaseModel):
+    verifier_org: str
+    verifier_email: str
+    credential_id: UUID
+    academic_work_details: str
+    concern: str
+
+class IntegrityRequestResponse(BaseModel):
+    id: UUID
+    verifier_org: str
+    verifier_email: str
+    credential_id: UUID
+    academic_work_details: str
+    concern: str
+    status: str
+    response_notes: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Notification schemas
+class NotificationResponse(BaseModel):
+    id: UUID
+    user_id: str
+    title: str
+    message: str
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class TamperSimulateRequest(BaseModel):
     credential_id: UUID
-    field_name: str
+    field_name: Optional[str] = None
+    field_to_tamper: Optional[str] = None
     new_value: str
 
 # Revocation schemas
